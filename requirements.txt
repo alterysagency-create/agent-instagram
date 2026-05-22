@@ -1,0 +1,6 @@
+flask
+flask-cors
+anthropic
+supabase
+requests
+python-dotenv
