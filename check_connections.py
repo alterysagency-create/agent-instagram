@@ -29,7 +29,7 @@ def main():
         from anthropic import Anthropic
         try:
             Anthropic(timeout=15, max_retries=0).messages.create(
-                model=os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-4-5'), max_tokens=8,
+                model=os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-5'), max_tokens=8,
                 messages=[{'role': 'user', 'content': 'Réponds OK'}])
             print('Anthropic: OK')
         except Exception as exc:

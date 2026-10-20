@@ -21,6 +21,10 @@ dans Flask : chaque traitement recharge les messages enregistrés dans Supabase.
   ont été validées depuis l'extérieur.
 - Application Meta publiée, callback HTTPS vérifié et abonnement Webhooks du
   compte `alterys.agency` activé. Le champ `messages` est abonné en version v26.0.
+- Flux réel Instagram validé : deux DMs ont été reçus, mémorisés, traités par
+  Anthropic et leurs réponses envoyées avec succès dès la première tentative.
+- Modèle par défaut migré vers `claude-sonnet-5` après validation par un appel
+  API réel, afin d'éviter la fin de vie annoncée de Sonnet 4.5.
 - Politique de confidentialité et instructions de suppression disponibles sur
   `/privacy` et `/data-deletion`, puis enregistrées dans les paramètres Meta.
 - La clé Anthropic existante est conservée ; la clé Supabase `anon` utilisée par
@@ -196,6 +200,5 @@ préparé et testé localement, avec intégration externe en attente.
 
 ## Étapes externes restantes
 
-1. Envoyer un vrai DM depuis un autre compte Instagram et confirmer la réponse.
-2. Pour une utilisation commerciale continue, remplacer l'instance Render gratuite
+1. Pour une utilisation commerciale continue, remplacer l'instance Render gratuite
    (qui s'endort après une période d'inactivité) par un service toujours actif.
