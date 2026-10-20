@@ -113,6 +113,13 @@ def create_app(store=None):
     @admin
     def handoffs():
         return jsonify(items=store.handoffs())
+    @app.get('/api/conversations/<conversation_id>')
+    @admin
+    def conversation_detail(conversation_id):
+        try:
+            return jsonify(store.conversation_detail(conversation_id))
+        except (IndexError, KeyError):
+            return jsonify(error='Unknown conversation'), 404
     @app.get('/webhook')
     def verify():
         token = os.getenv('META_VERIFY_TOKEN', '')

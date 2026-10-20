@@ -78,6 +78,13 @@ class Store:
             conversation['latest_message_at'] = latest[0]['created_at'] if latest else None
         return conversations
 
+    def conversation_detail(self, conversation_id):
+        conversation = self.conversation(conversation_id)
+        messages = (self.table('messages').select('role,content,created_at')
+                    .eq('conversation_id', conversation_id)
+                    .order('created_at').order('id').execute().data)
+        return {'conversation': conversation, 'messages': messages}
+
     def save_response(self, event, text):
         self.rpc('save_response', dict(p_event=event['id'], p_response=text))
 

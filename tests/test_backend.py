@@ -9,6 +9,7 @@ from unittest.mock import patch
 import requests
 from app import create_app
 from services.worker import process
+from services.agent_policy import critical_reply, normalize_reply
 
 
 class FakeStore:
@@ -39,6 +40,9 @@ class FakeStore:
     def update_sender_profile(self, cid, profile): self.conversations[cid].update(profile)
     def handoffs(self):
         return [c for c in self.conversations.values() if c['human_required']]
+    def conversation_detail(self, cid):
+        if cid not in self.conversations: raise IndexError(cid)
+        return {'conversation': self.conversations[cid], 'messages': self.messages[cid]}
     def save_response(self, event, text): event['response'] = text
     def finish(self, event, status, error_code=None):
         event['status'] = status
@@ -118,7 +122,7 @@ class BackendTests(unittest.TestCase):
         llm=LLM();process(self.store,e,llm)
         self.assertEqual(e['status'],'done');self.assertEqual(llm.calls,[])
         self.assertTrue(self.store.conversation(e['conversation_id'])['human_required'])
-        self.assertIn('prise en charge humaine', e['response'])
+        self.assertIn('file de suivi', e['response'])
     def test_confirmation_after_handoff_offer(self):
         e=self.store.enqueue('a','u','Projet précis','1','simulation');self.store.start(e)
         self.store.messages[e['conversation_id']].append(
@@ -133,6 +137,30 @@ class BackendTests(unittest.TestCase):
         result = self.client.get('/api/handoffs', headers=self.auth)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(len(result.json['items']), 1)
+    def test_conversation_detail_requires_admin(self):
+        self.store.conversations['a:u'] = dict(id='a:u', account_id='a', sender_id='u', human_required=True)
+        self.store.messages['a:u'] = [dict(role='user', content='Bonjour')]
+        self.assertEqual(self.client.get('/api/conversations/a:u').status_code, 401)
+        result = self.client.get('/api/conversations/a:u', headers=self.auth)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json['messages'][0]['content'], 'Bonjour')
+    def test_password_question_has_guaranteed_safe_answer(self):
+        e=self.store.enqueue('a','u',"Dois-je vous donner mon mot de passe Instagram ?",'1','simulation')
+        self.store.start(e); llm=LLM(); process(self.store,e,llm)
+        self.assertEqual(llm.calls, [])
+        self.assertIn('jamais votre mot de passe', e['response'])
+        self.assertIn('autorisation officielle de Meta', e['response'])
+        self.assertIn('combien de DM', e['response'])
+    def test_multipart_critical_question_answers_every_part(self):
+        message = "Quels sont vos tarifs, comment fonctionne l'automatisation et faut-il donner mes accès Insta ?"
+        response = critical_reply([dict(role='user', content=message)])
+        self.assertIn('mot de passe', response)
+        self.assertIn('Les DM arrivent', response)
+        self.assertIn('Le tarif dépend', response)
+    def test_reply_normalization(self):
+        response = normalize_reply('Bonjour   test\n\n\nSuite', limit=20)
+        self.assertLessEqual(len(response), 21)
+        self.assertNotIn('   ', response)
     def test_instagram_profile_is_saved(self):
         e=self.store.enqueue('a','ig-user','Bonjour','1','instagram');self.store.start(e)
         profile=lambda account,sender: dict(sender_username='client_test',sender_name='Client Test')

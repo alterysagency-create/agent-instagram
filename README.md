@@ -119,6 +119,7 @@ L'ancien POST de simulation `/webhook` est remplacé par `/api/simulate` authent
 | POST `/api/simulate` | Bearer admin | Mise en file ; 202 avec event_id |
 | GET `/api/events/<id>` | Bearer admin | État et réponse |
 | GET `/api/handoffs` | Bearer admin | File des conversations à reprendre humainement |
+| GET `/api/conversations/<id>` | Bearer admin | Profil et transcription complète d'une conversation |
 | POST `/api/conversations/<id>/handoff` | Bearer admin | `{ "human_required": true/false }` |
 | GET `/webhook` | Token Meta | Vérification du challenge |
 | POST `/webhook` | Signature Meta | DMs officiels |
@@ -156,6 +157,19 @@ réponses automatiques. Il s'agit d'une règle déterministe, pas d'un classifie
 Aucun email ou Slack n'est envoyé automatiquement. La reprise est une action admin explicite.
 Lors du premier message, le worker récupère aussi via l'API Meta le pseudo, le nom
 et la photo du client afin que la file de handoff soit identifiable humainement.
+
+## Qualité des réponses commerciales
+
+Le worker ajoute un contrat de réponse commun à tous les comptes : réponse directe
+avant toute relance, deux à cinq phrases courtes, une seule question à la fois et
+qualification progressive sans répéter une information déjà obtenue. Les tarifs,
+délais et services absents de la fiche business ne sont jamais inventés.
+
+Les questions sur les accès Instagram suivent une règle déterministe avant tout
+appel au modèle : l'agent interdit le partage du mot de passe et des codes de
+connexion, explique l'autorisation officielle Meta et poursuit avec une question
+utile. Cette règle répond aussi aux messages qui combinent sécurité, fonctionnement
+et prix. La transcription complète d'un handoff est consultable via la route admin.
 
 Un envoi Instagram avec timeout, perte de connexion ou erreur 5xx est considéré
 comme ambigu : il passe en `delivery_unknown` avec handoff, sans renvoi aveugle.
@@ -196,6 +210,9 @@ aucun service payant ou autorisation Meta n'a été créé automatiquement.
 `python live_validation.py` effectue explicitement trois appels Anthropic réels
 et crée deux comptes marqués Validation A/B. Ce test vérifie la mémoire entre
 processus, l'isolation et les doublons dans Supabase ; il n'envoie aucun DM Instagram.
+`python quality_validation.py` teste explicitement la qualité commerciale sur des
+scénarios sensibles sans envoyer de DM. `python configure_alterys.py` installe de
+façon idempotente les faits business validés du compte `@alterys.agency`.
 
 Pour valider la mémoire réellement : envoyer un message, attendre `done`, arrêter
 web et worker, redémarrer puis envoyer une question dépendant du premier message.
