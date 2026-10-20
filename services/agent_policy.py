@@ -97,14 +97,23 @@ def critical_reply(history):
             "Le tarif dépend du volume de DM, des réponses à automatiser, des connexions nécessaires et de "
             "l’accompagnement : je ne vais pas vous inventer un prix."
         )
-    parts.append("Environ combien de DM recevez-vous par semaine ?")
+    previous_user_text = ' '.join(
+        item.get('content', '') for item in history[:-1] if item.get('role') == 'user'
+    )
+    volume_known = re.search(r'\b\d+[\s-]*(?:dm|messages?)\b', previous_user_text, re.I)
+    if volume_known:
+        parts.append("Pour quelle période souhaitez-vous mettre cette automatisation en place ?")
+    else:
+        parts.append("Environ combien de DM recevez-vous par semaine ?")
     return "\n\n".join(parts)
 
 
-def normalize_reply(text, limit=700):
+def normalize_reply(text, limit=700, truncated=False):
     """Keep replies readable in Instagram and preserve the final useful question."""
     text = re.sub(r'[ \t]+', ' ', text or '').strip()
     text = re.sub(r'\n{3,}', '\n\n', text)
+    if truncated and text and text[-1] not in '.!?…':
+        text = text.rsplit(' ', 1)[0].rstrip(' ,;:') + '…'
     if len(text) <= limit:
         return text
     sentences = re.split(r'(?<=[.!?])\s+', text)

@@ -97,11 +97,13 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
             if llm is None:
                 llm = Anthropic(timeout=40, max_retries=2)
             result = llm.messages.create(model=os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-5'),
-                max_tokens=350, system=build_system_prompt(account['system_prompt']), messages=history)
+                max_tokens=600, system=build_system_prompt(account['system_prompt']), messages=history)
             response = ''.join(block.text for block in result.content if block.type == 'text').strip()
             if not response:
                 raise ValueError('Empty model response')
-        response = normalize_reply(response)
+            response = normalize_reply(response, truncated=getattr(result, 'stop_reason', None) == 'max_tokens')
+        else:
+            response = normalize_reply(response)
         store.save_response(event, response)
     if event['channel'] == 'instagram':
         store.finish(event, 'sending')

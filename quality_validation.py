@@ -5,15 +5,7 @@ import sys
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from services.agent_policy import build_system_prompt, critical_reply, normalize_reply
-
-
-BUSINESS_PROMPT = """Tu es l'assistant Instagram d'Alterys Agency.
-Alterys Agency étudie et met en place des automatisations de réponses aux DM
-Instagram pour des comptes professionnels. Une solution peut s'appuyer sur les
-questions fréquentes validées par l'entreprise, qualifier les demandes et mettre
-en pause une conversation afin qu'une personne la reprenne.
-Le contact de l'agence est alterys.agency@gmail.com.
-Aucun tarif public, délai standard ou catalogue contractuel n'est défini."""
+from services.store import Store
 
 
 SCENARIOS = [
@@ -40,15 +32,22 @@ def main():
     sys.stdout.reconfigure(encoding='utf-8')
     load_dotenv()
     client = Anthropic(timeout=40, max_retries=2)
-    prompt = build_system_prompt(BUSINESS_PROMPT)
+    rows = (Store().table('accounts').select('system_prompt')
+            .eq('instagram_handle', '@alterys.agency').execute().data)
+    if len(rows) != 1:
+        raise RuntimeError(f'Expected one Alterys account, found {len(rows)}')
+    prompt = build_system_prompt(rows[0]['system_prompt'])
     for number, history in enumerate(SCENARIOS, 1):
         result = client.messages.create(
             model=os.getenv('ANTHROPIC_MODEL', 'claude-sonnet-5'),
-            max_tokens=350,
+            max_tokens=600,
             system=prompt,
             messages=history,
         )
-        reply = normalize_reply(''.join(block.text for block in result.content if block.type == 'text'))
+        reply = normalize_reply(
+            ''.join(block.text for block in result.content if block.type == 'text'),
+            truncated=getattr(result, 'stop_reason', None) == 'max_tokens',
+        )
         validate(reply)
         print(f'[{number}] {reply}\n')
 

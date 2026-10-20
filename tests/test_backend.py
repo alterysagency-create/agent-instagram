@@ -157,10 +157,20 @@ class BackendTests(unittest.TestCase):
         self.assertIn('mot de passe', response)
         self.assertIn('Les DM arrivent', response)
         self.assertIn('Le tarif dépend', response)
+    def test_critical_reply_does_not_repeat_known_volume(self):
+        history = [
+            dict(role='user', content='Je reçois environ 80 DM par semaine.'),
+            dict(role='assistant', content='Quelles questions reviennent souvent ?'),
+            dict(role='user', content='Comment ça marche et faut-il donner mon mot de passe ?'),
+        ]
+        response = critical_reply(history)
+        self.assertNotIn('combien de DM', response)
+        self.assertIn('Pour quelle période', response)
     def test_reply_normalization(self):
         response = normalize_reply('Bonjour   test\n\n\nSuite', limit=20)
         self.assertLessEqual(len(response), 21)
         self.assertNotIn('   ', response)
+        self.assertEqual(normalize_reply('Phrase incomplète ici', truncated=True), 'Phrase incomplète…')
     def test_instagram_profile_is_saved(self):
         e=self.store.enqueue('a','ig-user','Bonjour','1','instagram');self.store.start(e)
         profile=lambda account,sender: dict(sender_username='client_test',sender_name='Client Test')
