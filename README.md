@@ -67,7 +67,10 @@ Une valeur locale a été ajoutée pour l'authentification admin.
    `id` et `created_at`. Les historiques importés ne sont jamais envoyés.
 4. Dans les paramètres Data API, ajouter `agent_ia` aux schémas exposés.
    Les tables ont RLS activé et aucun accès accordé à `anon`/`authenticated`.
-5. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
+5. Exécuter `migrations/003_lock_legacy_public.sql` pour activer RLS sur les
+   anciennes tables `public.accounts` et `public.conversations`. Le backend utilise
+   désormais `agent_ia` ; cette migration ferme seulement l'ancien accès public.
+6. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
 
 La file enregistre les DMs avant acquittement HTTP. Une panne Supabase renvoie 503
 afin de permettre une nouvelle livraison. Les événements sont uniques par
