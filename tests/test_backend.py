@@ -79,6 +79,13 @@ class BackendTests(unittest.TestCase):
         result = self.client.get('/webhook?hub.mode=subscribe&hub.verify_token=verify&hub.challenge=123')
         self.assertEqual(result.data, b'123')
         self.assertEqual(self.client.get('/webhook?hub.verify_token=wrong').status_code,403)
+    def test_public_legal_pages(self):
+        privacy = self.client.get('/privacy')
+        deletion = self.client.get('/data-deletion')
+        self.assertEqual(privacy.status_code, 200)
+        self.assertEqual(deletion.status_code, 200)
+        self.assertIn(b'alterys.agency@gmail.com', privacy.data)
+        self.assertIn(b'30 jours', deletion.data)
     def test_signature_and_echo(self):
         self.assertEqual(self.client.post('/webhook',json=self.payload()).status_code,403)
         self.assertEqual(self.signed(self.payload(True)).status_code,200)

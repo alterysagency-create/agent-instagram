@@ -50,6 +50,26 @@ def create_app(store=None):
     @app.get('/')
     def home():
         return jsonify(status='ok', service='AGENT-IA')
+    @app.get('/privacy')
+    def privacy():
+        return '''<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Politique de confidentialite - AGENT-IA</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#202124}h1,h2{line-height:1.25}small{color:#5f6368}</style></head>
+<body><h1>Politique de confidentialite - AGENT-IA</h1><small>Derniere mise a jour : 20 octobre 2026</small>
+<p>AGENT-IA aide Alterys Agency a repondre aux messages directs recus sur son compte Instagram professionnel.</p>
+<h2>Donnees traitees</h2><p>Le service traite l'identifiant Instagram de l'expediteur, le contenu et l'heure des messages, ainsi que les reponses produites. Il ne demande ni mot de passe Instagram ni donnee de paiement.</p>
+<h2>Utilisation</h2><p>Ces donnees servent uniquement a conserver le contexte de la conversation, generer une reponse et assurer le suivi technique du service.</p>
+<h2>Prestataires et conservation</h2><p>Les conversations sont stockees dans Supabase et le contenu necessaire a la reponse est traite par Anthropic. L'application est hebergee par Render. Les donnees sont conservees pendant la duree necessaire au service et peuvent etre supprimees sur demande.</p>
+<h2>Vos droits et suppression</h2><p>Pour demander l'acces, la rectification ou la suppression de vos donnees, ecrivez a <a href="mailto:alterys.agency@gmail.com">alterys.agency@gmail.com</a> en indiquant votre identifiant Instagram. Les demandes de suppression sont traitees dans les 30 jours.</p>
+<h2>Contact</h2><p>Alterys Agency - <a href="mailto:alterys.agency@gmail.com">alterys.agency@gmail.com</a></p></body></html>'''
+    @app.get('/data-deletion')
+    def data_deletion():
+        return '''<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Suppression des donnees - AGENT-IA</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#202124}h1{line-height:1.25}</style></head>
+<body><h1>Suppression des donnees AGENT-IA</h1><p>Pour demander la suppression de vos messages et de votre identifiant Instagram enregistres par AGENT-IA, ecrivez a <a href="mailto:alterys.agency@gmail.com">alterys.agency@gmail.com</a> depuis une adresse permettant de confirmer votre demande et indiquez votre identifiant Instagram.</p><p>Nous confirmerons la demande et supprimerons les donnees concernees sous 30 jours.</p></body></html>'''
     @app.get('/health/ready')
     def ready():
         store.ready()

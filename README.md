@@ -15,7 +15,10 @@ dans Flask : chaque traitement recharge les messages enregistrés dans Supabase.
 - Webhook et envoi Instagram implémentés. Le token professionnel `alterys.agency`
   est configuré localement et validé par un appel réel à l'API Meta v26.0.
   Le flux réel DM -> webhook -> réponse attend encore un déploiement HTTPS.
-- Configuration de déploiement prête, aucun hébergement publié.
+- Service Render publié sur `https://agent-instagram-alterys.onrender.com` avec
+  le web et le worker dans le même conteneur. Les routes publique, readiness,
+  vérification Meta et simulation complète web -> Supabase -> worker -> Anthropic
+  ont été validées depuis l'extérieur.
 - La clé Anthropic existante est conservée ; la clé Supabase `anon` utilisée par
   le backend a été remplacée par la clé `sb_secret_` déjà présente dans Supabase,
   sans création ni révocation de clé.
@@ -99,6 +102,8 @@ L'ancien POST de simulation `/webhook` est remplacé par `/api/simulate` authent
 | Route | Accès | Résultat |
 |---|---|---|
 | GET `/` | Public | Vie du processus |
+| GET `/privacy` | Public | Politique de confidentialité pour Meta et les utilisateurs |
+| GET `/data-deletion` | Public | Instructions de suppression des données |
 | GET `/health/ready` | Public | Disponibilité Supabase/schema |
 | POST `/api/setup` | Bearer admin | Création d'un business |
 | POST `/api/simulate` | Bearer admin | Mise en file ; 202 avec event_id |
@@ -125,7 +130,7 @@ Login, conserver `user_id` dans `instagram_id` et la valeur `id` renvoyée par
 `GET /me` dans `instagram_scoped_id`. Le backend reconnaît les deux dans les
 webhooks et utilise l'identifiant applicatif pour envoyer une réponse.
 
-Le callback est `https://VOTRE_DOMAINE/webhook`. Tester d'abord avec les comptes
+Le callback est `https://agent-instagram-alterys.onrender.com/webhook`. Tester d'abord avec les comptes
 autorisés de l'application. Un accès à des utilisateurs externes peut nécessiter
 les autorisations et validations Meta correspondantes.
 
@@ -187,6 +192,8 @@ préparé et testé localement, avec intégration externe en attente.
 
 ## Étapes externes restantes
 
-1. Pousser les commits locaux vers le dépôt GitHub après connexion au compte.
-2. Déployer le web et le worker, configurer `https://DOMAINE/webhook` dans Meta,
-   publier l'app si nécessaire et tester un vrai DM depuis un autre compte Instagram.
+1. Configurer `https://agent-instagram-alterys.onrender.com/webhook` dans Meta,
+   publier l'app si nécessaire et abonner `alterys.agency` aux webhooks.
+2. Envoyer un vrai DM depuis un autre compte Instagram et confirmer la réponse.
+3. Pour une utilisation commerciale continue, remplacer l'instance Render gratuite
+   (qui s'endort après une période d'inactivité) par un service toujours actif.
