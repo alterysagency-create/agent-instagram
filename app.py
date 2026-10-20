@@ -59,7 +59,7 @@ def create_app(store=None):
     def setup():
         data = body()
         account = {'business_name': field(data, 'business_name', 200), 'system_prompt': field(data, 'system_prompt', 12000)}
-        for name in ['email', 'instagram_handle', 'instagram_id', 'instagram_token_env']:
+        for name in ['email', 'instagram_handle', 'instagram_id', 'instagram_scoped_id', 'instagram_token_env']:
             if data.get(name):
                 account[name] = field(data, name, 200)
         account['plan'] = field(data, 'plan', 50) if data.get('plan') else 'starter'

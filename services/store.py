@@ -28,7 +28,10 @@ class Store:
         return rows[0] if rows else None
 
     def instagram_account(self, instagram_id):
-        rows = self.table('accounts').select('*').eq('instagram_id', instagram_id).execute().data
+        escaped = str(instagram_id).replace('\\', '\\\\').replace(',', '\\,')
+        rows = (self.table('accounts').select('*')
+                .or_(f'instagram_id.eq.{escaped},instagram_scoped_id.eq.{escaped}')
+                .execute().data)
         return rows[0] if rows else None
 
     def enqueue(self, account_id, sender_id, content, external_id, channel, occurred_at=None):

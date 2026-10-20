@@ -20,7 +20,7 @@ class FakeStore:
         self.conversations = {}
         self.messages = {}
     def account(self, aid): return self.accounts.get(aid)
-    def instagram_account(self, iid): return self.account({'ig-a': 'a', 'ig-b': 'b'}.get(iid))
+    def instagram_account(self, iid): return self.account({'ig-a': 'a', 'ig-a-scoped': 'a', 'ig-b': 'b'}.get(iid))
     def ready(self): pass
     def setup(self, data): return dict(id='new', **data)
     def enqueue(self, aid, sender, content, external, channel, occurred_at=None):
@@ -85,6 +85,10 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(len(self.store.events),0)
     def test_duplicate(self):
         self.signed(self.payload()); self.signed(self.payload())
+        self.assertEqual(len(self.store.events),1)
+    def test_scoped_instagram_id_routes_to_same_business(self):
+        payload=self.payload(); payload['entry'][0]['id']='ig-a-scoped'; payload['entry'][0]['messaging'][0]['recipient']['id']='ig-a-scoped'
+        self.assertEqual(self.signed(payload).status_code,200)
         self.assertEqual(len(self.store.events),1)
     def test_recipient_mismatch(self):
         payload=self.payload(); payload['entry'][0]['id']='ig-b'

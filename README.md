@@ -6,17 +6,15 @@ dans Flask : chaque traitement recharge les messages enregistrés dans Supabase.
 
 ## État vérifié le 20 octobre 2026
 
-- 13 tests locaux passent, avec dépendances externes simulées.
+- 14 tests locaux passent, avec dépendances externes simulées.
 - Appel réel Anthropic réussi avec le `.env` existant.
-- Le schéma Supabase et sa mémoire persistante ont déjà été validés. Le 20 octobre,
-  le domaine du projet ne résout plus : il faut se reconnecter au tableau de bord
-  et réactiver ou restaurer le projet avant le prochain test réel.
-- Migrations 001 et 002 appliquées ; deux anciennes conversations importées.
+- Le projet Supabase est actif ; connexion, schéma et mémoire persistante validés.
+- Migrations 001 à 004 appliquées ; deux anciennes conversations importées.
 - Mémoire persistante vérifiée avec des traitements dans des processus distincts,
   isolation de deux entreprises pour le même sender et déduplication réelle.
-- Webhook et envoi Instagram implémentés, non validés avec un vrai compte Meta.
-  Le secret de l'app est configuré localement ; le token professionnel
-  `alterys.agency` et la version d'API restent à fournir.
+- Webhook et envoi Instagram implémentés. Le token professionnel `alterys.agency`
+  est configuré localement et validé par un appel réel à l'API Meta v26.0.
+  Le flux réel DM -> webhook -> réponse attend encore un déploiement HTTPS.
 - Configuration de déploiement prête, aucun hébergement publié.
 - La clé Anthropic existante est conservée ; la clé Supabase `anon` utilisée par
   le backend a été remplacée par la clé `sb_secret_` déjà présente dans Supabase,
@@ -70,7 +68,9 @@ Une valeur locale a été ajoutée pour l'authentification admin.
 5. Exécuter `migrations/003_lock_legacy_public.sql` pour activer RLS sur les
    anciennes tables `public.accounts` et `public.conversations`. Le backend utilise
    désormais `agent_ia` ; cette migration ferme seulement l'ancien accès public.
-6. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
+6. Exécuter `migrations/004_instagram_scoped_id.sql` pour enregistrer séparément
+   l'identifiant public Instagram et l'identifiant propre à l'application Meta.
+7. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
 
 La file enregistre les DMs avant acquittement HTTP. Une panne Supabase renvoie 503
 afin de permettre une nouvelle livraison. Les événements sont uniques par
@@ -120,7 +120,10 @@ abonner le compte aux événements `messages`, puis fournir dans l'environnement
 `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_API_VERSION` et une variable de token
 par business, par exemple `INSTAGRAM_TOKEN_ALTERYS`. La version vient du tableau de
 bord Meta. Enregistrer `instagram_id` et `instagram_token_env` sur le compte
-`agent_ia.accounts` ; ne jamais placer le token dans cette table.
+`agent_ia.accounts` ; ne jamais placer le token dans cette table. Avec Instagram
+Login, conserver `user_id` dans `instagram_id` et la valeur `id` renvoyée par
+`GET /me` dans `instagram_scoped_id`. Le backend reconnaît les deux dans les
+webhooks et utilise l'identifiant applicatif pour envoyer une réponse.
 
 Le callback est `https://VOTRE_DOMAINE/webhook`. Tester d'abord avec les comptes
 autorisés de l'application. Un accès à des utilisateurs externes peut nécessiter
@@ -166,6 +169,7 @@ aucun service payant ou autorisation Meta n'a été créé automatiquement.
 ```powershell
 .\venv\Scripts\python.exe -m unittest discover -s tests -v
 .\venv\Scripts\python.exe check_connections.py --anthropic
+.\venv\Scripts\python.exe check_connections.py --instagram
 ```
 
 `python live_validation.py` effectue explicitement trois appels Anthropic réels
@@ -181,11 +185,6 @@ préparé et testé localement, avec intégration externe en attente.
 
 ## Étapes externes restantes
 
-1. Se reconnecter à Supabase et réactiver le projet `ylbxwfzpuhswzcnahkaj`, puis
-   relancer `python check_connections.py`.
-2. Dans Meta, générer le token avec le compte Instagram professionnel
-   `alterys.agency` (ne pas utiliser le compte personnel enregistré dans le navigateur).
-3. Renseigner `META_API_VERSION` et `INSTAGRAM_TOKEN_ALTERYS` dans `.env`, puis
-   enregistrer `instagram_token_env=INSTAGRAM_TOKEN_ALTERYS` sur le compte business.
-4. Déployer le web et le worker, configurer `https://DOMAINE/webhook` dans Meta,
+1. Pousser les commits locaux vers le dépôt GitHub après connexion au compte.
+2. Déployer le web et le worker, configurer `https://DOMAINE/webhook` dans Meta,
    publier l'app si nécessaire et tester un vrai DM depuis un autre compte Instagram.

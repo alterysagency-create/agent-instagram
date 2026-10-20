@@ -62,8 +62,9 @@ def process(store, event, llm=None, send=None):
 def send_instagram(account, recipient, text):
     version = os.environ['META_API_VERSION']
     token = os.environ[account['instagram_token_env']]
+    sender_id = account.get('instagram_scoped_id') or account['instagram_id']
     response = requests.post(
-        f"https://graph.instagram.com/{version}/{account['instagram_id']}/messages",
+        f"https://graph.instagram.com/{version}/{sender_id}/messages",
         headers={'Authorization': 'Bearer ' + token},
         json={'recipient': {'id': recipient}, 'message': {'text': text}}, timeout=(5, 20))
     if response.status_code >= 500:

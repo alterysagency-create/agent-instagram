@@ -54,6 +54,27 @@ def main():
             print('Supabase schema check:', type(exc).__name__)
             failed = True
 
+    if '--instagram' in sys.argv:
+        import requests
+        try:
+            version = os.environ['META_API_VERSION']
+            token = os.environ['INSTAGRAM_TOKEN_ALTERYS']
+            response = requests.get(
+                f'https://graph.instagram.com/{version}/me',
+                params={'fields': 'id,user_id,username,account_type'},
+                headers={'Authorization': 'Bearer ' + token}, timeout=20)
+            response.raise_for_status()
+            profile = response.json()
+            print('Instagram: OK')
+            print('Instagram username:', profile.get('username', 'missing'))
+            print('Instagram account type:', profile.get('account_type', 'missing'))
+            print('Instagram scoped id:', profile.get('id', 'missing'))
+            print('Instagram user id:', profile.get('user_id', 'missing'))
+        except Exception as exc:
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            print('Instagram:', type(exc).__name__, 'status:', status)
+            failed = True
+
     return 1 if failed else 0
 
 
