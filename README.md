@@ -116,6 +116,7 @@ L'ancien POST de simulation `/webhook` est remplacé par `/api/simulate` authent
 | POST `/api/setup` | Bearer admin | Création d'un business |
 | POST `/api/simulate` | Bearer admin | Mise en file ; 202 avec event_id |
 | GET `/api/events/<id>` | Bearer admin | État et réponse |
+| GET `/api/handoffs` | Bearer admin | File des conversations à reprendre humainement |
 | POST `/api/conversations/<id>/handoff` | Bearer admin | `{ "human_required": true/false }` |
 | GET `/webhook` | Token Meta | Vérification du challenge |
 | POST `/webhook` | Signature Meta | DMs officiels |
@@ -147,9 +148,10 @@ les autorisations et validations Meta correspondantes.
 Anthropic dispose de retries bornés ; la file retente avec délai exponentiel
 jusqu'à cinq traitements, puis suspend l'automatisation. Les messages et réponses
 générées sont conservés. Le contexte est limité aux 30 derniers messages.
-Une demande explicite de personne humaine ou remboursement suspend les réponses ;
-il s'agit d'une règle déterministe, pas d'un classifieur IA. Aucun email ou Slack
-n'est envoyé automatiquement. La reprise est une action admin explicite.
+Une demande explicite de personne humaine ou une confirmation après une proposition
+de mise en relation enregistre la conversation dans `/api/handoffs` et suspend les
+réponses automatiques. Il s'agit d'une règle déterministe, pas d'un classifieur IA.
+Aucun email ou Slack n'est envoyé automatiquement. La reprise est une action admin explicite.
 
 Un envoi Instagram avec timeout, perte de connexion ou erreur 5xx est considéré
 comme ambigu : il passe en `delivery_unknown` avec handoff, sans renvoi aveugle.

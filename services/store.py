@@ -60,6 +60,18 @@ class Store:
     def handoff(self, conversation_id, required):
         return self.table('conversations').update({'human_required': required}).eq('id', conversation_id).execute()
 
+    def handoffs(self):
+        conversations = (self.table('conversations')
+                         .select('id,account_id,sender_id,created_at,human_required')
+                         .eq('human_required', True).order('created_at', desc=True).execute().data)
+        for conversation in conversations:
+            latest = (self.table('messages').select('content,created_at')
+                      .eq('conversation_id', conversation['id']).eq('role', 'user')
+                      .order('created_at', desc=True).order('id', desc=True).limit(1).execute().data)
+            conversation['latest_message'] = latest[0]['content'] if latest else None
+            conversation['latest_message_at'] = latest[0]['created_at'] if latest else None
+        return conversations
+
     def save_response(self, event, text):
         self.rpc('save_response', dict(p_event=event['id'], p_response=text))
 

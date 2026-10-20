@@ -36,6 +36,8 @@ class FakeStore:
     def conversation(self, cid): return self.conversations[cid]
     def context(self, cid): return list(self.messages[cid])
     def handoff(self, cid, required): self.conversations[cid]['human_required'] = required
+    def handoffs(self):
+        return [c for c in self.conversations.values() if c['human_required']]
     def save_response(self, event, text): event['response'] = text
     def finish(self, event, status, error_code=None):
         event['status'] = status
@@ -113,7 +115,23 @@ class BackendTests(unittest.TestCase):
     def test_handoff(self):
         e=self.store.enqueue('a','u','Je veux parler à quelqu’un','1','simulation');self.store.start(e)
         llm=LLM();process(self.store,e,llm)
-        self.assertEqual(e['status'],'handoff');self.assertEqual(llm.calls,[])
+        self.assertEqual(e['status'],'done');self.assertEqual(llm.calls,[])
+        self.assertTrue(self.store.conversation(e['conversation_id'])['human_required'])
+        self.assertIn('prise en charge humaine', e['response'])
+    def test_confirmation_after_handoff_offer(self):
+        e=self.store.enqueue('a','u','Projet précis','1','simulation');self.store.start(e)
+        self.store.messages[e['conversation_id']].append(
+            dict(role='assistant', content='Souhaitez-vous que je transmette votre demande ?'))
+        e=self.store.enqueue('a','u','Oui','2','simulation');self.store.start(e)
+        llm=LLM();process(self.store,e,llm)
+        self.assertEqual(e['status'],'done');self.assertEqual(llm.calls,[])
+        self.assertTrue(self.store.conversation(e['conversation_id'])['human_required'])
+    def test_handoff_queue_requires_admin(self):
+        self.store.conversations['a:u'] = dict(id='a:u', account_id='a', sender_id='u', human_required=True)
+        self.assertEqual(self.client.get('/api/handoffs').status_code, 401)
+        result = self.client.get('/api/handoffs', headers=self.auth)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(len(result.json['items']), 1)
     def test_send_timeout_no_resend(self):
         e=self.store.enqueue('a','u','Bonjour','1','instagram');self.store.start(e)
         def send(*args): raise requests.Timeout()

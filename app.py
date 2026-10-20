@@ -109,6 +109,10 @@ def create_app(store=None):
             raise InputError('human_required must be boolean')
         store.handoff(conversation_id, data['human_required'])
         return jsonify(status='success')
+    @app.get('/api/handoffs')
+    @admin
+    def handoffs():
+        return jsonify(items=store.handoffs())
     @app.get('/webhook')
     def verify():
         token = os.getenv('META_VERIFY_TOKEN', '')
