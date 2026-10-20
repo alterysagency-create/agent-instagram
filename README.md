@@ -19,6 +19,10 @@ dans Flask : chaque traitement recharge les messages enregistrés dans Supabase.
   le web et le worker dans le même conteneur. Les routes publique, readiness,
   vérification Meta et simulation complète web -> Supabase -> worker -> Anthropic
   ont été validées depuis l'extérieur.
+- Application Meta publiée, callback HTTPS vérifié et abonnement Webhooks du
+  compte `alterys.agency` activé. Le champ `messages` est abonné en version v26.0.
+- Politique de confidentialité et instructions de suppression disponibles sur
+  `/privacy` et `/data-deletion`, puis enregistrées dans les paramètres Meta.
 - La clé Anthropic existante est conservée ; la clé Supabase `anon` utilisée par
   le backend a été remplacée par la clé `sb_secret_` déjà présente dans Supabase,
   sans création ni révocation de clé.
@@ -112,7 +116,7 @@ L'ancien POST de simulation `/webhook` est remplacé par `/api/simulate` authent
 | GET `/webhook` | Token Meta | Vérification du challenge |
 | POST `/webhook` | Signature Meta | DMs officiels |
 
-## Connexion Meta : intervention utilisateur requise
+## Connexion Meta
 
 Cette version utilise **Instagram API with Instagram Login** et
 `graph.instagram.com`. Si l'application existante utilise Facebook Login,
@@ -192,8 +196,6 @@ préparé et testé localement, avec intégration externe en attente.
 
 ## Étapes externes restantes
 
-1. Configurer `https://agent-instagram-alterys.onrender.com/webhook` dans Meta,
-   publier l'app si nécessaire et abonner `alterys.agency` aux webhooks.
-2. Envoyer un vrai DM depuis un autre compte Instagram et confirmer la réponse.
-3. Pour une utilisation commerciale continue, remplacer l'instance Render gratuite
+1. Envoyer un vrai DM depuis un autre compte Instagram et confirmer la réponse.
+2. Pour une utilisation commerciale continue, remplacer l'instance Render gratuite
    (qui s'endort après une période d'inactivité) par un service toujours actif.
