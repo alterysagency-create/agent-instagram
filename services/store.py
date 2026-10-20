@@ -60,9 +60,15 @@ class Store:
     def handoff(self, conversation_id, required):
         return self.table('conversations').update({'human_required': required}).eq('id', conversation_id).execute()
 
+    def update_sender_profile(self, conversation_id, profile):
+        values = {key: profile.get(key) for key in
+                  ['sender_username', 'sender_name', 'sender_profile_pic'] if profile.get(key)}
+        if values:
+            self.table('conversations').update(values).eq('id', conversation_id).execute()
+
     def handoffs(self):
         conversations = (self.table('conversations')
-                         .select('id,account_id,sender_id,created_at,human_required')
+                         .select('id,account_id,sender_id,sender_username,sender_name,sender_profile_pic,created_at,human_required')
                          .eq('human_required', True).order('created_at', desc=True).execute().data)
         for conversation in conversations:
             latest = (self.table('messages').select('content,created_at')

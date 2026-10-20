@@ -36,6 +36,7 @@ class FakeStore:
     def conversation(self, cid): return self.conversations[cid]
     def context(self, cid): return list(self.messages[cid])
     def handoff(self, cid, required): self.conversations[cid]['human_required'] = required
+    def update_sender_profile(self, cid, profile): self.conversations[cid].update(profile)
     def handoffs(self):
         return [c for c in self.conversations.values() if c['human_required']]
     def save_response(self, event, text): event['response'] = text
@@ -132,6 +133,13 @@ class BackendTests(unittest.TestCase):
         result = self.client.get('/api/handoffs', headers=self.auth)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(len(result.json['items']), 1)
+    def test_instagram_profile_is_saved(self):
+        e=self.store.enqueue('a','ig-user','Bonjour','1','instagram');self.store.start(e)
+        profile=lambda account,sender: dict(sender_username='client_test',sender_name='Client Test')
+        process(self.store,e,LLM(),lambda *args: None,profile)
+        conversation=self.store.conversation(e['conversation_id'])
+        self.assertEqual(conversation['sender_username'],'client_test')
+        self.assertEqual(conversation['sender_name'],'Client Test')
     def test_send_timeout_no_resend(self):
         e=self.store.enqueue('a','u','Bonjour','1','instagram');self.store.start(e)
         def send(*args): raise requests.Timeout()

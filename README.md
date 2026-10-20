@@ -81,7 +81,9 @@ Une valeur locale a été ajoutée pour l'authentification admin.
    désormais `agent_ia` ; cette migration ferme seulement l'ancien accès public.
 6. Exécuter `migrations/004_instagram_scoped_id.sql` pour enregistrer séparément
    l'identifiant public Instagram et l'identifiant propre à l'application Meta.
-7. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
+7. Exécuter `migrations/005_conversation_instagram_profile.sql` pour afficher le
+   pseudo, le nom et la photo Instagram dans les reprises humaines.
+8. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
 
 La file enregistre les DMs avant acquittement HTTP. Une panne Supabase renvoie 503
 afin de permettre une nouvelle livraison. Les événements sont uniques par
@@ -152,6 +154,8 @@ Une demande explicite de personne humaine ou une confirmation après une proposi
 de mise en relation enregistre la conversation dans `/api/handoffs` et suspend les
 réponses automatiques. Il s'agit d'une règle déterministe, pas d'un classifieur IA.
 Aucun email ou Slack n'est envoyé automatiquement. La reprise est une action admin explicite.
+Lors du premier message, le worker récupère aussi via l'API Meta le pseudo, le nom
+et la photo du client afin que la file de handoff soit identifiable humainement.
 
 Un envoi Instagram avec timeout, perte de connexion ou erreur 5xx est considéré
 comme ambigu : il passe en `delivery_unknown` avec handoff, sans renvoi aveugle.

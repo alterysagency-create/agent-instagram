@@ -28,9 +28,28 @@ def handoff_requested(history):
                ['souhaitez-vous que je transmette', 'mettre en relation', 'transmettre votre demande'])
 
 
-def process(store, event, llm=None, send=None):
+def fetch_instagram_profile(account, sender_id):
+    version = os.environ['META_API_VERSION']
+    token = os.environ[account['instagram_token_env']]
+    response = requests.get(
+        f'https://graph.instagram.com/{version}/{sender_id}',
+        headers={'Authorization': 'Bearer ' + token},
+        params={'fields': 'id,name,username,profile_pic'}, timeout=(5, 15))
+    response.raise_for_status()
+    data = response.json()
+    return {'sender_username': data.get('username'), 'sender_name': data.get('name'),
+            'sender_profile_pic': data.get('profile_pic')}
+
+
+def process(store, event, llm=None, send=None, profile_lookup=None):
     conversation = store.conversation(event['conversation_id'])
     account = store.account(conversation['account_id'])
+    if event['channel'] == 'instagram' and profile_lookup and not conversation.get('sender_username'):
+        try:
+            profile = profile_lookup(account, conversation['sender_id'])
+            store.update_sender_profile(conversation['id'], profile)
+        except (requests.RequestException, ValueError, KeyError):
+            log.warning('instagram_profile_lookup_failed')
     if conversation['human_required']:
         store.finish(event, 'handoff')
         return
@@ -114,7 +133,7 @@ def main():
         try:
             event = store.claim()
             if event:
-                process(store, event)
+                process(store, event, profile_lookup=fetch_instagram_profile)
                 log.info('event_processed id=%s', event['id'])
             else:
                 time.sleep(2)
