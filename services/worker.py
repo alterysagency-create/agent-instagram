@@ -67,8 +67,8 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
         return
     history = store.context(conversation['id'])
     if handoff_requested(history):
-        response = ("C’est enregistré. L’équipe voit maintenant votre demande dans sa file de suivi "
-                    "et pourra reprendre cette conversation ici. Les réponses automatiques sont mises en pause.")
+        response = ("C’est enregistré dans la file de suivi de l’agence. Une personne pourra reprendre "
+                    "cette conversation ici. Les réponses automatiques sont mises en pause.")
         store.save_response(event, response)
         if event['channel'] == 'instagram':
             store.finish(event, 'sending')
