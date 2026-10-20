@@ -154,7 +154,9 @@ ne constitue pas une protection garantie contre toute injection de prompt.
 
 ## Déploiement
 
-Déployer deux processus avec le même environnement :
+Le `Dockerfile` lance le web et le worker dans le même petit service via
+`start_production.py`. Cette configuration réduit le coût pour la première version.
+Si le volume augmente, déployer ensuite deux processus avec le même environnement :
 
 - Web : Dockerfile fourni ou `gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 60 app:app`.
 - Worker : même image, commande `python -m services.worker`.
