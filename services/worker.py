@@ -5,6 +5,7 @@ import re
 import time
 import unicodedata
 from datetime import datetime, timezone
+from pathlib import Path
 import requests
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -15,6 +16,13 @@ from services.store import Store
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 log = logging.getLogger('agent.worker')
+
+
+def heartbeat():
+    """Tell the web process that the queue consumer is still running."""
+    path = os.getenv('AGENT_WORKER_HEARTBEAT')
+    if path:
+        Path(path).touch()
 
 
 def handoff_requested(history):
@@ -151,10 +159,12 @@ def main():
     while True:
         event = None
         try:
+            heartbeat()
             event = store.claim()
             if event:
                 process(store, event, profile_lookup=fetch_instagram_profile)
                 log.info('event_processed id=%s', event['id'])
+                heartbeat()
             else:
                 time.sleep(2)
         except Exception as exc:

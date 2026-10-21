@@ -4,9 +4,9 @@ Backend Flask existant repris avec Anthropic et Supabase/PostgreSQL. Les comptes
 business sont isolés par `(account_id, sender_id)`. La mémoire n'est plus stockée
 dans Flask : chaque traitement recharge les messages enregistrés dans Supabase.
 
-## État vérifié le 20 octobre 2026
+## État vérifié le 21 octobre 2026
 
-- 14 tests locaux passent, avec dépendances externes simulées.
+- 33 tests locaux passent, avec dépendances externes simulées.
 - Appel réel Anthropic réussi avec le `.env` existant.
 - Le projet Supabase est actif ; connexion, schéma et mémoire persistante validés.
 - Migrations 001 à 004 appliquées ; deux anciennes conversations importées.
@@ -194,6 +194,9 @@ ne constitue pas une protection garantie contre toute injection de prompt.
 
 Le `Dockerfile` lance le web et le worker dans le même petit service via
 `start_production.py`. Cette configuration réduit le coût pour la première version.
+La route `/health/ready` vérifie Supabase et le signal d'activité du worker : si le
+consommateur de file s'arrête, Render reçoit un échec de readiness au lieu d'un faux
+état prêt.
 Si le volume augmente, déployer ensuite deux processus avec le même environnement :
 
 - Web : Dockerfile fourni ou `gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 60 app:app`.

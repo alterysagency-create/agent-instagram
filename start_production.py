@@ -3,11 +3,16 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 
 def main():
     port = os.getenv('PORT', '10000')
+    heartbeat = Path(tempfile.gettempdir()) / 'agent-ia-worker-heartbeat'
+    os.environ['AGENT_WORKER_HEARTBEAT'] = str(heartbeat)
+    heartbeat.unlink(missing_ok=True)
     processes = [
         subprocess.Popen([sys.executable, '-m', 'services.worker']),
         subprocess.Popen([

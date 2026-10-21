@@ -4,6 +4,7 @@ import hmac
 import logging
 import os
 from functools import wraps
+from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -73,6 +74,16 @@ def create_app(store=None):
     @app.get('/health/ready')
     def ready():
         store.ready()
+        heartbeat = os.getenv('AGENT_WORKER_HEARTBEAT')
+        if heartbeat:
+            try:
+                age = datetime.now(timezone.utc).timestamp() - Path(heartbeat).stat().st_mtime
+            except OSError as exc:
+                raise RuntimeError('Worker heartbeat unavailable') from exc
+            # A model call can legitimately take more than 30 seconds. This
+            # threshold detects a stuck consumer without killing active work.
+            if age > 180:
+                raise RuntimeError('Worker heartbeat stale')
         return jsonify(status='ready')
     @app.post('/api/setup')
     @admin

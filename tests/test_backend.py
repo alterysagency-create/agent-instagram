@@ -2,8 +2,10 @@ import hashlib
 import hmac
 import json
 import os
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import requests
@@ -292,6 +294,16 @@ class BackendTests(unittest.TestCase):
             result=self.client.get('/health/ready')
         self.assertEqual(result.status_code,503)
         self.assertNotIn(b'private token',result.data)
+    def test_readiness_checks_worker_heartbeat_when_enabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            heartbeat = Path(directory) / 'worker-heartbeat'
+            with patch.dict(os.environ, AGENT_WORKER_HEARTBEAT=str(heartbeat)):
+                self.assertEqual(self.client.get('/health/ready').status_code, 503)
+                heartbeat.touch()
+                self.assertEqual(self.client.get('/health/ready').status_code, 200)
+                old = datetime.now(timezone.utc).timestamp() - 181
+                os.utime(heartbeat, (old, old))
+                self.assertEqual(self.client.get('/health/ready').status_code, 503)
     def test_old_dm_not_sent(self):
         e=self.store.enqueue('a','u','Bonjour','1','instagram', '2020-01-01T00:00:00+00:00')
         llm=LLM();process(self.store,e,llm)
