@@ -83,13 +83,14 @@ PHONE_RE = re.compile(r'(?<!\d)(?:\+?33|0)[1-9](?:[ .-]?\d{2}){4}(?!\d)')
 HANDOFF_CLAIM_RE = re.compile(
     r"(?:j['’]ai|nous avons)\s+(?:bien\s+)?(?:transmis|enregistr[ée]|not[ée])|"
     r"(?:votre\s+)?demande\s+(?:est|sera)\s+(?:bien\s+)?(?:not[ée]e?|transmise|suivie|[ée]tudi[ée]e?)|"
-    r"(?:une personne|un membre|l['’][ée]quipe).{0,50}(?:va|vont|vous recontact|[ée]tudier|suivre)",
+    r"(?:une personne|un membre|l['’][ée]quipe).{0,80}"
+    r"(?:va|vont|pourra|reviend|reprend|recontact|contact|[ée]tudi|suiv)",
     re.IGNORECASE,
 )
 CONTACT_ASK_RE = re.compile(
-    r"(?:meilleur moyen|comment|o[uù]).{0,50}(?:recontacter|contacter)|"
-    r"(?:email|e-mail).{0,20}(?:ou|et).{0,20}(?:dm|instagram)|"
-    r"(?:dm|instagram).{0,20}(?:ou|et).{0,20}(?:email|e-mail)",
+    r"(?:(?:meilleur|quel) moyen|comment|o[uù]).{0,70}(?:recontacter|contacter|contact)|"
+    r"(?:email|e-mail).{0,20}(?:ou|et|,).{0,20}(?:dm|instagram)|"
+    r"(?:dm|instagram).{0,20}(?:ou|et|,).{0,20}(?:email|e-mail)",
     re.IGNORECASE,
 )
 
@@ -142,7 +143,12 @@ def extract_lead_data(history):
             topics.append(label)
     if topics:
         data['topics'] = topics
-    if re.search(r'\b(?:pr[ée]ven\w*|validation|valider).{0,50}(?:lien|paiement)\b', folded, re.I):
+    if re.search(
+        r'\b(?:pr[ée]ven\w*|validation|valider).{0,60}(?:lien|paiement)\b|'
+        r'\b(?:lien|paiement).{0,60}(?:apr[eè]s|avec|seulement).{0,30}(?:validation|valid\w*)\b',
+        folded,
+        re.I,
+    ):
         data['manual_approval_before_payment_link'] = True
     data['last_user_message'] = user_texts[-1][:500] if user_texts else None
     return data

@@ -157,6 +157,17 @@ class BackendTests(unittest.TestCase):
         self.assertIn('Souhaitez-vous que j’enregistre', e['response'])
         self.assertIn('50 par semaine', e['response'])
         self.assertNotIn('test@example.com', e['response'])
+    def test_natural_contact_question_triggers_deterministic_consent(self):
+        history = [
+            dict(role='user', content='Je reçois 50 DM par semaine.'),
+            dict(role='assistant', content=(
+                "Quel moyen de contact préférez-vous pour qu'une personne de l'équipe revienne "
+                "vers vous (email, Instagram) ?")),
+            dict(role='user', content='DM Instagram ou test@example.com'),
+        ]
+        response = contact_consent_reply(history)
+        self.assertIn('Souhaitez-vous que j’enregistre', response)
+        self.assertNotIn("l'équipe", response)
     def test_consent_after_structured_summary_creates_actionable_handoff(self):
         cid = 'a:u'
         self.store.conversations[cid] = dict(id=cid, account_id='a', sender_id='u',
@@ -186,6 +197,15 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(self.store.conversation(e['conversation_id'])['human_required'])
         self.assertIn('Souhaitez-vous que j’enregistre', e['response'])
         self.assertNotIn('va étudier', e['response'])
+    def test_generated_future_handoff_variants_are_blocked(self):
+        history = [dict(role='user', content='Contactez-moi par DM Instagram')]
+        for unsafe in [
+            "Une personne de l'équipe reviendra vers vous.",
+            "Je l'enregistre pour qu'une personne de l'équipe l'étudie.",
+        ]:
+            response = guard_assistant_reply(history, unsafe)
+            self.assertIn('Souhaitez-vous que j’enregistre', response)
+            self.assertNotEqual(response, unsafe)
     def test_handoff_queue_requires_admin(self):
         self.store.conversations['a:u'] = dict(id='a:u', account_id='a', sender_id='u', human_required=True)
         self.assertEqual(self.client.get('/api/handoffs').status_code, 401)
@@ -225,6 +245,9 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(data['desired_deadline'], 'sous 1 semaine')
         self.assertEqual(data['contact_email'], 'test@example.com')
         self.assertTrue(data['instagram_contact_ok'])
+        reverse = extract_lead_data([dict(role='user', content=
+            'Envoyer un lien Stripe seulement après ma validation.')])
+        self.assertTrue(reverse['manual_approval_before_payment_link'])
     def test_instagram_topic_is_not_mistaken_for_contact_preference(self):
         data = extract_lead_data([dict(role='user', content=
             'Je veux automatiser mes DM Instagram et je reçois 50 DM par semaine.')])
