@@ -172,8 +172,15 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(conversation['lead_data']['dm_volume'], '50 par semaine')
         self.assertIn('stripe', conversation['lead_data']['tools'])
         self.assertEqual(conversation['handoff_reason'], 'client_confirmed')
-    def test_generated_false_handoff_claim_is_replaced_by_consent(self):
+    def test_generated_false_handoff_claim_requests_missing_contact(self):
         e=self.store.enqueue('a','u','Voici mon projet','1','simulation');self.store.start(e)
+        llm=LLM("Une personne de l'équipe va étudier votre demande et vous recontacter.")
+        process(self.store,e,llm)
+        self.assertFalse(self.store.conversation(e['conversation_id'])['human_required'])
+        self.assertIn('quel moyen de contact', e['response'])
+        self.assertNotIn('va étudier', e['response'])
+    def test_generated_false_handoff_claim_with_contact_requests_consent(self):
+        e=self.store.enqueue('a','u','Contactez-moi par DM Instagram','1','simulation');self.store.start(e)
         llm=LLM("Une personne de l'équipe va étudier votre demande et vous recontacter.")
         process(self.store,e,llm)
         self.assertFalse(self.store.conversation(e['conversation_id'])['human_required'])

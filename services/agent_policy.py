@@ -171,7 +171,7 @@ def lead_summary(history):
         facts.append('contact accepté : téléphone')
     elif data.get('instagram_contact_ok'):
         facts.append('contact accepté : DM Instagram')
-    return '; '.join(facts[:6]) or 'demande d’automatisation Instagram'
+    return '; '.join(facts[:8]) or 'demande d’automatisation Instagram'
 
 
 def consent_request(history):
@@ -192,8 +192,13 @@ def contact_consent_reply(history):
 
 
 def guard_assistant_reply(history, response):
-    """Replace any unconfirmed handoff claim with an explicit consent request."""
+    """Replace an unconfirmed handoff claim with the next safe qualification step."""
     if HANDOFF_CLAIM_RE.search(response or ''):
+        data = extract_lead_data(history)
+        if not any(data.get(key) for key in
+                   ('contact_email', 'contact_phone', 'instagram_contact_ok')):
+            return ("Pour préparer la suite sans rien transmettre pour l’instant, quel moyen de contact "
+                    "préférez-vous : DM Instagram, email ou téléphone ?")
         return consent_request(history)
     return response
 
