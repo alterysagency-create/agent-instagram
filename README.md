@@ -113,7 +113,7 @@ L'ancien POST de simulation `/webhook` est remplacé par `/api/simulate` authent
 
 | Route | Accès | Résultat |
 |---|---|---|
-| GET `/` | Public | Vie du processus |
+| GET `/` | Public | Vie du processus et révision déployée |
 | GET `/privacy` | Public | Politique de confidentialité pour Meta et les utilisateurs |
 | GET `/data-deletion` | Public | Instructions de suppression des données |
 | GET `/health/ready` | Public | Disponibilité Supabase/schema |

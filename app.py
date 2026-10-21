@@ -50,7 +50,8 @@ def create_app(store=None):
         return jsonify(error='Service temporarily unavailable'), 503
     @app.get('/')
     def home():
-        return jsonify(status='ok', service='AGENT-IA')
+        version = os.getenv('RENDER_GIT_COMMIT', 'local')[:7]
+        return jsonify(status='ok', service='AGENT-IA', version=version)
     @app.get('/privacy')
     def privacy():
         return '''<!doctype html>

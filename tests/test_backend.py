@@ -90,6 +90,11 @@ class BackendTests(unittest.TestCase):
     def test_admin_required(self):
         self.assertEqual(self.client.post('/api/setup', json={}).status_code, 401)
         self.assertEqual(self.client.post('/api/simulate', json={}).status_code, 401)
+    def test_home_exposes_deployed_revision(self):
+        with patch.dict(os.environ, RENDER_GIT_COMMIT='1234567890'):
+            result = self.client.get('/')
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json['version'], '1234567')
     def test_validation(self):
         self.assertEqual(self.client.post('/api/simulate', json=[], headers=self.auth).status_code, 400)
         for message in ['', 'x'*2001, None]:
