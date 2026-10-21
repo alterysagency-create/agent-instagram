@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 import requests
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from services.agent_policy import build_system_prompt, critical_reply, normalize_reply
+from services.agent_policy import (build_system_prompt, contact_consent_reply,
+                                   critical_reply, extract_lead_data,
+                                   guard_assistant_reply, normalize_reply)
 from services.store import Store
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
@@ -37,7 +39,9 @@ def handoff_requested(history):
         return False
     previous = history[-2]['content'].casefold()
     return any(phrase in previous for phrase in
-               ['souhaitez-vous que je transmette', 'mettre en relation', 'transmettre votre demande'])
+               ['souhaitez-vous que je transmette', 'mettre en relation',
+                'transmettre votre demande', 'enregistre maintenant cette demande',
+                'enregistrer maintenant cette demande'])
 
 
 def fetch_instagram_profile(account, sender_id):
@@ -67,6 +71,7 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
         return
     history = store.context(conversation['id'])
     if handoff_requested(history):
+        lead_data = extract_lead_data(history)
         response = ("C’est enregistré dans la file de suivi de l’agence. Une personne pourra reprendre "
                     "cette conversation ici. Les réponses automatiques sont mises en pause.")
         store.save_response(event, response)
@@ -75,10 +80,10 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
             try:
                 (send or send_instagram)(account, conversation['sender_id'], response)
             except (requests.Timeout, requests.ConnectionError):
-                store.handoff(conversation['id'], True)
+                store.handoff(conversation['id'], True, lead_data, 'delivery_unknown_during_handoff')
                 store.finish(event, 'delivery_unknown', 'AmbiguousDelivery')
                 return
-        store.handoff(conversation['id'], True)
+        store.handoff(conversation['id'], True, lead_data, 'client_confirmed')
         store.finish(event, 'done')
         return
     if event['channel'] == 'instagram':
@@ -87,12 +92,12 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
             return
         age = datetime.now(timezone.utc) - datetime.fromisoformat(event['created_at'])
         if age.total_seconds() >= 23 * 3600:
-            store.handoff(conversation['id'], True)
+            store.handoff(conversation['id'], True, extract_lead_data(history), 'message_expired')
             store.finish(event, 'expired')
             return
     response = event.get('response')
     if not response:
-        response = critical_reply(history)
+        response = contact_consent_reply(history) or critical_reply(history)
         if response is None:
             if llm is None:
                 llm = Anthropic(timeout=40, max_retries=2)
@@ -101,6 +106,7 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
             response = ''.join(block.text for block in result.content if block.type == 'text').strip()
             if not response:
                 raise ValueError('Empty model response')
+            response = guard_assistant_reply(history, response)
             response = normalize_reply(response, truncated=getattr(result, 'stop_reason', None) == 'max_tokens')
         else:
             response = normalize_reply(response)
@@ -113,7 +119,7 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
                 return
             (send or send_instagram)(account, conversation['sender_id'], response)
         except (requests.Timeout, requests.ConnectionError):
-            store.handoff(conversation['id'], True)
+            store.handoff(conversation['id'], True, extract_lead_data(history), 'delivery_unknown')
             store.finish(event, 'delivery_unknown', 'AmbiguousDelivery')
             return
     store.finish(event, 'done')

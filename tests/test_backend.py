@@ -9,7 +9,9 @@ from unittest.mock import patch
 import requests
 from app import create_app
 from services.worker import process
-from services.agent_policy import critical_reply, normalize_reply
+from services.agent_policy import (contact_consent_reply, critical_reply,
+                                   extract_lead_data, guard_assistant_reply,
+                                   normalize_reply)
 
 
 class FakeStore:
@@ -27,7 +29,8 @@ class FakeStore:
     def enqueue(self, aid, sender, content, external, channel, occurred_at=None):
         cid = aid + ':' + sender
         eid = cid + ':' + channel + ':' + external
-        self.conversations.setdefault(cid, dict(id=cid, account_id=aid, sender_id=sender, human_required=False))
+        self.conversations.setdefault(cid, dict(id=cid, account_id=aid, sender_id=sender,
+                                                human_required=False, lead_data={}))
         self.messages.setdefault(cid, [])
         self.events.setdefault(eid, dict(id=eid, conversation_id=cid, content=content,
             channel=channel, status='pending', attempts=1, response=None,
@@ -36,7 +39,14 @@ class FakeStore:
     def event(self, eid): return self.events.get(eid)
     def conversation(self, cid): return self.conversations[cid]
     def context(self, cid): return list(self.messages[cid])
-    def handoff(self, cid, required): self.conversations[cid]['human_required'] = required
+    def handoff(self, cid, required, lead_data=None, reason=None):
+        self.conversations[cid]['human_required'] = required
+        if required:
+            self.conversations[cid]['lead_data'] = lead_data or {}
+            self.conversations[cid]['handoff_reason'] = reason
+        else:
+            self.conversations[cid].update(lead_data={}, handoff_reason=None,
+                                           handoff_requested_at=None)
     def update_sender_profile(self, cid, profile): self.conversations[cid].update(profile)
     def handoffs(self):
         return [c for c in self.conversations.values() if c['human_required']]
@@ -53,10 +63,10 @@ class FakeStore:
 
 
 class LLM:
-    def __init__(self): self.messages = self; self.calls = []
+    def __init__(self, text='Bonjour'): self.messages = self; self.calls = []; self.text = text
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(content=[SimpleNamespace(type='text', text='Bonjour')])
+        return SimpleNamespace(content=[SimpleNamespace(type='text', text=self.text)])
 
 
 class BackendTests(unittest.TestCase):
@@ -131,6 +141,44 @@ class BackendTests(unittest.TestCase):
         llm=LLM();process(self.store,e,llm)
         self.assertEqual(e['status'],'done');self.assertEqual(llm.calls,[])
         self.assertTrue(self.store.conversation(e['conversation_id'])['human_required'])
+        self.assertEqual(self.store.conversation(e['conversation_id'])['handoff_reason'], 'client_confirmed')
+    def test_contact_capture_requests_consent_without_false_handoff(self):
+        cid = 'a:u'
+        self.store.conversations[cid] = dict(id=cid, account_id='a', sender_id='u',
+                                             human_required=False, lead_data={})
+        self.store.messages[cid] = [
+            dict(role='user', content='Je reçois 50 DM par semaine et j’utilise Stripe.'),
+            dict(role='assistant', content='Quel est le meilleur moyen de vous recontacter, email ou DM Instagram ?'),
+        ]
+        e=self.store.enqueue('a','u','DM ou test@example.com','1','simulation');self.store.start(e)
+        llm=LLM();process(self.store,e,llm)
+        self.assertEqual(llm.calls, [])
+        self.assertFalse(self.store.conversation(cid)['human_required'])
+        self.assertIn('Souhaitez-vous que j’enregistre', e['response'])
+        self.assertIn('50 par semaine', e['response'])
+        self.assertNotIn('test@example.com', e['response'])
+    def test_consent_after_structured_summary_creates_actionable_handoff(self):
+        cid = 'a:u'
+        self.store.conversations[cid] = dict(id=cid, account_id='a', sender_id='u',
+                                             human_required=False, lead_data={})
+        self.store.messages[cid] = [
+            dict(role='user', content='50 DM par semaine, Stripe, objectif sous 1 semaine, offre 500 euros.'),
+            dict(role='assistant', content="Souhaitez-vous que j’enregistre maintenant cette demande dans la file de suivi de l’agence ?"),
+        ]
+        e=self.store.enqueue('a','u','Oui merci','1','simulation');self.store.start(e)
+        process(self.store,e,LLM())
+        conversation = self.store.conversation(cid)
+        self.assertTrue(conversation['human_required'])
+        self.assertEqual(conversation['lead_data']['dm_volume'], '50 par semaine')
+        self.assertIn('stripe', conversation['lead_data']['tools'])
+        self.assertEqual(conversation['handoff_reason'], 'client_confirmed')
+    def test_generated_false_handoff_claim_is_replaced_by_consent(self):
+        e=self.store.enqueue('a','u','Voici mon projet','1','simulation');self.store.start(e)
+        llm=LLM("Une personne de l'équipe va étudier votre demande et vous recontacter.")
+        process(self.store,e,llm)
+        self.assertFalse(self.store.conversation(e['conversation_id'])['human_required'])
+        self.assertIn('Souhaitez-vous que j’enregistre', e['response'])
+        self.assertNotIn('va étudier', e['response'])
     def test_handoff_queue_requires_admin(self):
         self.store.conversations['a:u'] = dict(id='a:u', account_id='a', sender_id='u', human_required=True)
         self.assertEqual(self.client.get('/api/handoffs').status_code, 401)
@@ -157,6 +205,27 @@ class BackendTests(unittest.TestCase):
         self.assertIn('mot de passe', response)
         self.assertIn('Les DM arrivent', response)
         self.assertIn('Le tarif dépend', response)
+    def test_lead_extraction_uses_explicit_facts(self):
+        history = [dict(role='user', content=(
+            'Je reçois 50 DM par semaine. Mon offre coûte 500 euros, Stripe est utilisé, '
+            'je veux prévenir avant le lien de paiement et être prêt sous 1 semaine. '
+            'Contact par DM ou test@example.com.'))]
+        data = extract_lead_data(history)
+        self.assertEqual(data['dm_volume'], '50 par semaine')
+        self.assertEqual(data['prospect_prices'], ['500 euros'])
+        self.assertEqual(data['tools'], ['stripe'])
+        self.assertTrue(data['manual_approval_before_payment_link'])
+        self.assertEqual(data['desired_deadline'], 'sous 1 semaine')
+        self.assertEqual(data['contact_email'], 'test@example.com')
+        self.assertTrue(data['instagram_contact_ok'])
+    def test_instagram_topic_is_not_mistaken_for_contact_preference(self):
+        data = extract_lead_data([dict(role='user', content=
+            'Je veux automatiser mes DM Instagram et je reçois 50 DM par semaine.')])
+        self.assertNotIn('instagram_contact_ok', data)
+    def test_truthfulness_guard_leaves_safe_reply_unchanged(self):
+        history = [dict(role='user', content='Bonjour')]
+        self.assertEqual(guard_assistant_reply(history, 'Bonjour, comment puis-je vous aider ?'),
+                         'Bonjour, comment puis-je vous aider ?')
     def test_critical_reply_does_not_repeat_known_volume(self):
         history = [
             dict(role='user', content='Je reçois environ 80 DM par semaine.'),

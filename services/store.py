@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from supabase import create_client
 
 
@@ -57,8 +58,17 @@ class Store:
     def conversation(self, conversation_id):
         return self.table('conversations').select('*').eq('id', conversation_id).execute().data[0]
 
-    def handoff(self, conversation_id, required):
-        return self.table('conversations').update({'human_required': required}).eq('id', conversation_id).execute()
+    def handoff(self, conversation_id, required, lead_data=None, reason=None):
+        values = {'human_required': required}
+        if required:
+            values['handoff_requested_at'] = datetime.now(timezone.utc).isoformat()
+            if lead_data is not None:
+                values['lead_data'] = lead_data
+            if reason:
+                values['handoff_reason'] = reason
+        else:
+            values.update(lead_data={}, handoff_reason=None, handoff_requested_at=None)
+        return self.table('conversations').update(values).eq('id', conversation_id).execute()
 
     def update_sender_profile(self, conversation_id, profile):
         values = {key: profile.get(key) for key in
@@ -68,7 +78,7 @@ class Store:
 
     def handoffs(self):
         conversations = (self.table('conversations')
-                         .select('id,account_id,sender_id,sender_username,sender_name,sender_profile_pic,created_at,human_required')
+                         .select('id,account_id,sender_id,sender_username,sender_name,sender_profile_pic,created_at,human_required,lead_data,handoff_reason,handoff_requested_at')
                          .eq('human_required', True).order('created_at', desc=True).execute().data)
         for conversation in conversations:
             latest = (self.table('messages').select('content,created_at')

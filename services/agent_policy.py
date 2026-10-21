@@ -18,11 +18,18 @@ prospect, de comprendre son besoin et de faciliter la prochaine étape commercia
    sauf s'il demande explicitement le tutoiement. Fais 2 à 5 phrases courtes,
    650 caractères maximum. Utilise au plus un emoji et une seule question par réponse.
 3. Ne répète ni le message précédent ni une formule d'accueil déjà utilisée.
+   N'ajoute pas systématiquement « merci », « parfait » ou un emoji.
 4. Après la réponse, pose seulement la prochaine question de qualification la plus
    utile qui n'a pas encore reçu de réponse : volume approximatif de DM, questions
-   fréquentes, actions souhaitées, délai, puis moyen de contact préféré.
+   fréquentes, réponse exacte à chacune de ces questions, actions souhaitées,
+   limites et validations humaines, outils actuels, délai, puis moyen de contact.
+   Si plusieurs FAQ sont citées, collecte leurs réponses une par une avant de passer
+   au délai ou au contact. Clarifie toute consigne ambiguë au lieu de l'interpréter.
 5. Si le prospect exprime une frustration, reconnais-la brièvement, excuse-toi et
    réponds immédiatement sur le fond.
+6. Distingue toujours le prix des offres du prospect du prix des services Alterys.
+   Un montant communiqué par le prospect peut être reformulé comme son information,
+   mais ne devient jamais un tarif d'Alterys.
 
 INFORMATIONS FIABLES SUR L'AUTOMATISATION DES DM
 - Le compte Instagram professionnel est relié par l'autorisation officielle Meta.
@@ -43,8 +50,10 @@ PRIX ET ENGAGEMENTS
 PASSAGE À UNE PERSONNE
 - Tu peux proposer une reprise humaine lorsqu'une décision, un devis final, un litige
   ou une information absente l'exige.
-- Ne dis jamais « j'ai transmis », « on va vous rappeler » ou « prochainement » tant
-  que le système ne t'a pas confirmé la mise en file humaine.
+- À la fin de la qualification, résume uniquement les faits donnés par le prospect,
+  puis demande explicitement son accord pour enregistrer la demande dans la file.
+- Ne dis jamais que la demande est notée, transmise, suivie ou étudiée par l'équipe,
+  et ne promets jamais de rappel, tant que le système n'a pas confirmé la mise en file.
 - Si la reprise est confirmée par le système, indique seulement que la demande est
   visible dans la file de suivi et que les réponses automatiques sont mises en pause.
 
@@ -69,10 +78,124 @@ HOW_RE = re.compile(
     r"\b(comment|fonctionne|fonctionnement|automatis(?:er|ation)|mise en place|installer)\b",
     re.IGNORECASE,
 )
+EMAIL_RE = re.compile(r'(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+', re.IGNORECASE)
+PHONE_RE = re.compile(r'(?<!\d)(?:\+?33|0)[1-9](?:[ .-]?\d{2}){4}(?!\d)')
+HANDOFF_CLAIM_RE = re.compile(
+    r"(?:j['’]ai|nous avons)\s+(?:bien\s+)?(?:transmis|enregistr[ée]|not[ée])|"
+    r"(?:votre\s+)?demande\s+(?:est|sera)\s+(?:bien\s+)?(?:not[ée]e?|transmise|suivie|[ée]tudi[ée]e?)|"
+    r"(?:une personne|un membre|l['’][ée]quipe).{0,50}(?:va|vont|vous recontact|[ée]tudier|suivre)",
+    re.IGNORECASE,
+)
+CONTACT_ASK_RE = re.compile(
+    r"(?:meilleur moyen|comment|o[uù]).{0,50}(?:recontacter|contacter)|"
+    r"(?:email|e-mail).{0,20}(?:ou|et).{0,20}(?:dm|instagram)|"
+    r"(?:dm|instagram).{0,20}(?:ou|et).{0,20}(?:email|e-mail)",
+    re.IGNORECASE,
+)
 
 
 def build_system_prompt(account_prompt):
     return (account_prompt or '').strip() + QUALITY_PROMPT
+
+
+def extract_lead_data(history):
+    """Extract only explicit prospect facts; never infer missing business data."""
+    user_texts = [item.get('content', '') for item in history if item.get('role') == 'user']
+    joined = ' '.join(user_texts)
+    folded = joined.casefold()
+    data = {}
+    volume = re.search(r'\b(\d+)\s*(?:dm|messages?)\s*(?:par|/)\s*(jour|semaine|mois)\b', joined, re.I)
+    if volume:
+        data['dm_volume'] = f'{volume.group(1)} par {volume.group(2).lower()}'
+    prices = re.findall(r'\b\d+(?:[.,]\d+)?\s*(?:€|euros?)\b', joined, re.I)
+    if prices:
+        data['prospect_prices'] = list(dict.fromkeys(prices))[:5]
+    providers = [name for name in ['stripe', 'paypal', 'calendly', 'shopify', 'woocommerce']
+                 if name in folded]
+    if providers:
+        data['tools'] = providers
+    deadlines = re.findall(r'\b(?:dans|en|sous)\s+\d+\s*(?:jours?|semaines?|mois)\b', joined, re.I)
+    if deadlines:
+        data['desired_deadline'] = deadlines[-1]
+    emails = EMAIL_RE.findall(joined)
+    if emails:
+        data['contact_email'] = emails[-1]
+    phones = PHONE_RE.findall(joined)
+    if phones:
+        data['contact_phone'] = phones[-1]
+    if re.search(
+        r'(?:\b(?:contact|recontact|joindre|écrire|répondre)\w*\b.{0,40}\b(?:dm|instagram)\b)|'
+        r'(?:^|[.!?]\s*)(?:par\s+)?(?:dm|instagram)(?:\s+(?:ou|et)\s+(?:email|e-mail))?(?:[.!?]|$)',
+        joined,
+        re.I,
+    ):
+        data['instagram_contact_ok'] = True
+    topics = []
+    for label, pattern in [
+        ('prix', r'\b(?:prix|tarifs?)\b'), ('délais', r'\b(?:d[ée]lais?|temps que .{0,10}prend)\b'),
+        ('paiements', r'\b(?:paiements?|stripe|liens? de paiement)\b'),
+        ('mises à jour', r'\b(?:mises? [àa] jour|maintenance)\b'),
+        ('qualification', r'\b(?:qualifi|prospects? chauds?)\w*\b'),
+        ('rendez-vous', r'\b(?:rendez-vous|rdv|calendly)\b'),
+    ]:
+        if re.search(pattern, folded, re.I):
+            topics.append(label)
+    if topics:
+        data['topics'] = topics
+    if re.search(r'\b(?:pr[ée]ven\w*|validation|valider).{0,50}(?:lien|paiement)\b', folded, re.I):
+        data['manual_approval_before_payment_link'] = True
+    data['last_user_message'] = user_texts[-1][:500] if user_texts else None
+    return data
+
+
+def lead_summary(history):
+    data = extract_lead_data(history)
+    facts = []
+    if data.get('dm_volume'):
+        facts.append(f"volume : {data['dm_volume']} DM")
+    if data.get('topics'):
+        facts.append('besoins : ' + ', '.join(data['topics']))
+    if data.get('prospect_prices'):
+        facts.append('prix communiqué par le prospect : ' + ', '.join(data['prospect_prices']))
+    if data.get('tools'):
+        facts.append('outils : ' + ', '.join(data['tools']))
+    if data.get('desired_deadline'):
+        facts.append('objectif : ' + data['desired_deadline'])
+    if data.get('manual_approval_before_payment_link'):
+        facts.append('validation humaine avant tout lien de paiement')
+    if data.get('contact_email') and data.get('instagram_contact_ok'):
+        facts.append('contact accepté : DM Instagram ou email')
+    elif data.get('contact_email'):
+        facts.append('contact accepté : email')
+    elif data.get('contact_phone'):
+        facts.append('contact accepté : téléphone')
+    elif data.get('instagram_contact_ok'):
+        facts.append('contact accepté : DM Instagram')
+    return '; '.join(facts[:6]) or 'demande d’automatisation Instagram'
+
+
+def consent_request(history):
+    return ("Avant de passer à une personne, voici mon résumé : "
+            + lead_summary(history) + ".\n\n"
+            "Souhaitez-vous que j’enregistre maintenant cette demande dans la file de suivi de l’agence ?")
+
+
+def contact_consent_reply(history):
+    if len(history) < 2 or history[-1].get('role') != 'user' or history[-2].get('role') != 'assistant':
+        return None
+    current = history[-1].get('content', '')
+    has_contact = bool(EMAIL_RE.search(current) or PHONE_RE.search(current)
+                       or re.search(r'\b(?:dm|instagram|whatsapp)\b', current, re.I))
+    if has_contact and CONTACT_ASK_RE.search(history[-2].get('content', '')):
+        return consent_request(history)
+    return None
+
+
+def guard_assistant_reply(history, response):
+    """Replace any unconfirmed handoff claim with an explicit consent request."""
+    if HANDOFF_CLAIM_RE.search(response or ''):
+        return consent_request(history)
+    return response
 
 
 def critical_reply(history):

@@ -83,7 +83,9 @@ Une valeur locale a été ajoutée pour l'authentification admin.
    l'identifiant public Instagram et l'identifiant propre à l'application Meta.
 7. Exécuter `migrations/005_conversation_instagram_profile.sql` pour afficher le
    pseudo, le nom et la photo Instagram dans les reprises humaines.
-8. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
+8. Exécuter `migrations/006_structured_handoff.sql` pour conserver les faits utiles,
+   la raison et l'heure d'une reprise humaine confirmée.
+9. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
 
 La file enregistre les DMs avant acquittement HTTP. Une panne Supabase renvoie 503
 afin de permettre une nouvelle livraison. Les événements sont uniques par
@@ -170,6 +172,9 @@ appel au modèle : l'agent interdit le partage du mot de passe et des codes de
 connexion, explique l'autorisation officielle Meta et poursuit avec une question
 utile. Cette règle répond aussi aux messages qui combinent sécurité, fonctionnement
 et prix. La transcription complète d'un handoff est consultable via la route admin.
+Toute affirmation générée prétendant qu'une demande est déjà transmise, suivie ou
+étudiée est remplacée par un résumé et une demande de consentement. Après confirmation,
+la file contient aussi les faits structurés explicitement donnés par le prospect.
 
 Un envoi Instagram avec timeout, perte de connexion ou erreur 5xx est considéré
 comme ambigu : il passe en `delivery_unknown` avec handoff, sans renvoi aveugle.
