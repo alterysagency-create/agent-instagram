@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import requests
 from app import create_app
-from services.worker import process
+from services.worker import process, process_appointment
 from services.agent_policy import (contact_consent_reply, critical_reply,
                                    extract_lead_data, greeting_reply, guard_assistant_reply,
                                    lead_summary, normalize_reply)
@@ -24,6 +24,7 @@ class FakeStore:
         self.events = {}
         self.conversations = {}
         self.messages = {}
+        self.appointment_rows = {}
     def account(self, aid): return self.accounts.get(aid)
     def instagram_account(self, iid): return self.account({'ig-a': 'a', 'ig-a-scoped': 'a', 'ig-b': 'b'}.get(iid))
     def ready(self): pass
@@ -55,6 +56,52 @@ class FakeStore:
     def conversation_detail(self, cid):
         if cid not in self.conversations: raise IndexError(cid)
         return {'conversation': self.conversations[cid], 'messages': self.messages[cid]}
+    def match_conversation(self, account_id, conversation_id=None,
+                           instagram_username=None, attendee_email=None):
+        rows = [row for row in self.conversations.values() if row['account_id'] == account_id]
+        if conversation_id:
+            matches = [row for row in rows if row['id'] == conversation_id]
+            return (matches[0], 'conversation_id') if len(matches) == 1 else (None, None)
+        username = (instagram_username or '').lstrip('@').casefold()
+        matches = [row for row in rows
+                   if str(row.get('sender_username', '')).casefold() == username] if username else []
+        if len(matches) == 1: return matches[0], 'instagram_username'
+        email = (attendee_email or '').casefold()
+        matches = [row for row in rows if str((row.get('lead_data') or {})
+                   .get('contact_email', '')).casefold() == email] if email else []
+        return ((matches[0], 'lead_email') if len(matches) == 1 else (None, None))
+    def upsert_appointment(self, values):
+        key = values['account_id'] + ':' + values['external_id']
+        current = self.appointment_rows.get(key, {})
+        row = dict(current, id=current.get('id', key), **values)
+        self.appointment_rows[key] = row
+        return row
+    def appointments(self, status=None):
+        rows = list(self.appointment_rows.values())
+        return [row for row in rows if not status or row['status'] == status]
+    def appointment(self, appointment_id):
+        return next((row for row in self.appointment_rows.values()
+                     if row['id'] == appointment_id), None)
+    def appointment_detail(self, appointment_id):
+        row = self.appointment(appointment_id)
+        if not row: raise IndexError(appointment_id)
+        return {'appointment': row, 'conversation': None, 'messages': []}
+    def link_appointment(self, appointment_id, conversation_id, method='manual'):
+        row = self.appointment(appointment_id)
+        if not row: raise IndexError(appointment_id)
+        conversation, _ = self.match_conversation(row['account_id'], conversation_id)
+        if not conversation: raise ValueError('Conversation does not belong to appointment account')
+        row.update(conversation_id=conversation_id, match_method=method, status='pending')
+        return row
+    def appointment_context(self, appointment):
+        conversation = self.conversations.get(appointment.get('conversation_id'))
+        return (self.account(appointment['account_id']), conversation,
+                list(self.messages.get(appointment.get('conversation_id'), [])))
+    def finish_appointment(self, appointment, status, error_code=None, brief=None, brief_text=None):
+        appointment.update(status=status, error_code=error_code, brief=brief, brief_text=brief_text)
+    def save_notion_sync(self, appointment_id, page_id=None, error=None):
+        row = self.appointment(appointment_id)
+        row.update(notion_page_id=page_id, notion_sync_error=error)
     def save_response(self, event, text): event['response'] = text
     def finish(self, event, status, error_code=None):
         event['status'] = status
@@ -73,12 +120,14 @@ class LLM:
 
 class BackendTests(unittest.TestCase):
     def setUp(self):
-        self.env = patch.dict(os.environ, ADMIN_API_KEY='local-test', META_APP_SECRET='secret', META_VERIFY_TOKEN='verify')
+        self.env = patch.dict(os.environ, ADMIN_API_KEY='local-test', META_APP_SECRET='secret',
+                              META_VERIFY_TOKEN='verify', CALENDAR_INGEST_KEY='calendar-test')
         self.env.start()
         self.addCleanup(self.env.stop)
         self.store = FakeStore()
         self.client = create_app(self.store).test_client()
         self.auth = {'Authorization': 'Bearer local-test'}
+        self.calendar_auth = {'Authorization': 'Bearer calendar-test'}
     def signed(self, payload):
         raw = json.dumps(payload).encode()
         sig = 'sha256=' + hmac.new(b'secret', raw, hashlib.sha256).hexdigest()
@@ -90,6 +139,45 @@ class BackendTests(unittest.TestCase):
     def test_admin_required(self):
         self.assertEqual(self.client.post('/api/setup', json={}).status_code, 401)
         self.assertEqual(self.client.post('/api/simulate', json={}).status_code, 401)
+        self.assertEqual(self.client.get('/api/appointments').status_code, 401)
+        self.assertEqual(self.client.post('/api/calendar/events', json={}).status_code, 401)
+    def test_calendar_event_matches_instagram_username(self):
+        self.store.conversations['a:ig-user'] = dict(
+            id='a:ig-user', account_id='a', sender_id='ig-user',
+            sender_username='thiziri_hml', human_required=False, lead_data={})
+        self.store.messages['a:ig-user'] = []
+        payload = dict(account_id='a', external_id='google-1', status='confirmed',
+                       title='Appel découverte Alterys',
+                       start_at='2026-10-25T14:00:00+02:00',
+                       end_at='2026-10-25T14:20:00+02:00',
+                       instagram_username='@thiziri_hml', attendee_email='client@example.com')
+        result = self.client.post('/api/calendar/events', json=payload,
+                                  headers=self.calendar_auth)
+        self.assertEqual(result.status_code, 202)
+        self.assertTrue(result.json['matched'])
+        row = self.store.appointment_rows['a:google-1']
+        self.assertEqual(row['conversation_id'], 'a:ig-user')
+        self.assertEqual(row['match_method'], 'instagram_username')
+    def test_calendar_event_never_guesses_ambiguous_email(self):
+        for sender in ('one', 'two'):
+            cid = 'a:' + sender
+            self.store.conversations[cid] = dict(
+                id=cid, account_id='a', sender_id=sender, human_required=False,
+                lead_data={'contact_email': 'same@example.com'})
+            self.store.messages[cid] = []
+        payload = dict(account_id='a', external_id='google-2', status='confirmed',
+                       title='Appel découverte Alterys',
+                       start_at='2026-10-25T14:00:00Z', end_at='2026-10-25T14:20:00Z',
+                       attendee_email='same@example.com')
+        result = self.client.post('/api/calendar/events', json=payload,
+                                  headers=self.calendar_auth)
+        self.assertEqual(result.status_code, 202)
+        self.assertFalse(result.json['matched'])
+    def test_calendar_rejects_invalid_range(self):
+        payload = dict(account_id='a', external_id='bad', title='Appel',
+                       start_at='2026-10-25T15:00:00Z', end_at='2026-10-25T14:00:00Z')
+        self.assertEqual(self.client.post('/api/calendar/events', json=payload,
+                         headers=self.calendar_auth).status_code, 400)
     def test_home_exposes_deployed_revision(self):
         with patch.dict(os.environ, RENDER_GIT_COMMIT='1234567890'):
             result = self.client.get('/')
@@ -324,6 +412,67 @@ class BackendTests(unittest.TestCase):
         conversation=self.store.conversation(e['conversation_id'])
         self.assertEqual(conversation['sender_username'],'client_test')
         self.assertEqual(conversation['sender_name'],'Client Test')
+    def test_pre_call_brief_uses_real_instagram_profile_and_explicit_facts(self):
+        cid = 'a:ig-user'
+        self.store.conversations[cid] = dict(
+            id=cid, account_id='a', sender_id='ig-user', sender_username='client_test',
+            sender_name='Client Test', human_required=False, lead_data={})
+        self.store.messages[cid] = [
+            dict(role='user', content='Je crée des sites web et je reçois 50 DM par semaine.'),
+            dict(role='assistant', content='Quel est votre principal problème ?'),
+            dict(role='user', content='Je perds du temps à répondre aux mêmes questions.'),
+        ]
+        appointment = dict(
+            id='appointment-1', account_id='a', conversation_id=cid,
+            external_id='google-1', status='processing', title='Appel découverte Alterys',
+            start_at='2026-10-25T14:00:00+02:00', end_at='2026-10-25T14:20:00+02:00',
+            timezone='Europe/Paris', attendee_name='Client Test',
+            attendee_email='client@example.com', meeting_url='https://meet.google.com/test')
+        self.store.appointment_rows['a:google-1'] = appointment
+        answer = json.dumps({
+            'summary': 'Le prospect veut réduire le temps passé sur les questions répétitives.',
+            'main_need': 'Automatiser les réponses répétitives.',
+            'pain_points': ['Temps perdu sur les réponses répétitives'],
+            'objections': [], 'missing_information': ['Budget non précisé'],
+            'recommended_agenda': ['Valider les questions récurrentes'],
+            'suggested_questions': ['Quelles questions reviennent le plus ?'],
+        })
+        brief = process_appointment(self.store, appointment, LLM(answer), notion_sync=False)
+        self.assertEqual(appointment['status'], 'ready')
+        self.assertEqual(brief['prospect']['instagram_username'], 'client_test')
+        self.assertEqual(brief['known_facts']['dm_volume'], '50 par semaine')
+        self.assertIn('@client_test', appointment['brief_text'])
+        self.assertNotIn('budget de', appointment['brief_text'].casefold())
+    def test_unmatched_appointment_is_flagged_without_model_call(self):
+        appointment = dict(
+            id='appointment-2', account_id='a', conversation_id=None,
+            external_id='google-2', status='processing', title='Appel découverte Alterys',
+            start_at='2026-10-25T14:00:00Z', end_at='2026-10-25T14:20:00Z',
+            attendee_email='unknown@example.com')
+        self.store.appointment_rows['a:google-2'] = appointment
+        llm = LLM()
+        brief = process_appointment(self.store, appointment, llm, notion_sync=False)
+        self.assertEqual(llm.calls, [])
+        self.assertEqual(appointment['status'], 'unmatched')
+        self.assertIn('aucune conversation Instagram certaine', brief['analysis']['summary'])
+    def test_notion_failure_does_not_destroy_ready_brief(self):
+        cid = 'a:ig-user'
+        self.store.conversations[cid] = dict(
+            id=cid, account_id='a', sender_id='ig-user', sender_username='client_test',
+            sender_name='Client Test', human_required=False, lead_data={})
+        self.store.messages[cid] = [dict(role='user', content='Je reçois 20 DM par semaine.')]
+        appointment = dict(
+            id='appointment-3', account_id='a', conversation_id=cid,
+            external_id='google-3', status='processing', title='Appel découverte Alterys',
+            start_at='2026-10-25T14:00:00Z', end_at='2026-10-25T14:20:00Z')
+        self.store.appointment_rows['a:google-3'] = appointment
+        answer = json.dumps({key: ('Résumé' if key in ('summary','main_need') else [])
+                             for key in ('summary','main_need','pain_points','objections',
+                                         'missing_information','recommended_agenda','suggested_questions')})
+        def broken_sync(*args): raise requests.ConnectionError('secret body')
+        process_appointment(self.store, appointment, LLM(answer), notion_sync=broken_sync)
+        self.assertEqual(appointment['status'], 'ready')
+        self.assertEqual(appointment['notion_sync_error'], 'ConnectionError')
     def test_send_timeout_no_resend(self):
         e=self.store.enqueue('a','u','Bonjour','1','instagram');self.store.start(e)
         def send(*args): raise requests.Timeout()

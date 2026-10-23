@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from services.agent_policy import (build_system_prompt, contact_consent_reply,
                                    critical_reply, extract_lead_data, greeting_reply,
                                    guard_assistant_reply, normalize_reply)
+from services.meeting_briefs import generate_brief, unmatched_brief
+from services.notion_sync import configured as notion_configured, sync_appointment
 from services.store import Store
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
@@ -159,12 +161,42 @@ def send_instagram(account, recipient, text):
         raise requests.ConnectionError('Missing message acknowledgement')
 
 
+def process_appointment(store, appointment, llm=None, notion_sync=None):
+    """Build one factual pre-call brief and optionally mirror it to Notion."""
+    account, conversation, messages = store.appointment_context(appointment)
+    if not account:
+        raise ValueError('Unknown appointment account')
+    if conversation is None:
+        brief, brief_text = unmatched_brief(appointment)
+        final_status = 'unmatched'
+    else:
+        if llm is None:
+            llm = Anthropic(timeout=50, max_retries=2)
+        brief, brief_text = generate_brief(
+            appointment, account, conversation, messages, llm)
+        final_status = 'ready'
+
+    store.finish_appointment(appointment, final_status, brief=brief, brief_text=brief_text)
+    sync = notion_sync if notion_sync is not None else (
+        sync_appointment if notion_configured() else None)
+    if sync:
+        synced = dict(appointment, status=final_status)
+        try:
+            page_id = sync(synced, brief, brief_text)
+            store.save_notion_sync(appointment['id'], page_id=page_id)
+        except (requests.RequestException, ValueError, KeyError) as exc:
+            log.warning('notion_sync_failed type=%s', type(exc).__name__)
+            store.save_notion_sync(appointment['id'], error=type(exc).__name__)
+    return brief
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     logging.getLogger('httpx').setLevel(logging.WARNING)
     store = Store()
     while True:
         event = None
+        appointment = None
         try:
             heartbeat()
             event = store.claim()
@@ -173,7 +205,13 @@ def main():
                 log.info('event_processed id=%s', event['id'])
                 heartbeat()
             else:
-                time.sleep(2)
+                appointment = store.claim_appointment()
+                if appointment:
+                    process_appointment(store, appointment)
+                    log.info('appointment_processed id=%s', appointment['id'])
+                    heartbeat()
+                else:
+                    time.sleep(2)
         except Exception as exc:
             log.error('worker_failed type=%s', type(exc).__name__)
             if event:
@@ -181,6 +219,11 @@ def main():
                     store.finish(event, 'retry', type(exc).__name__)
                 except Exception:
                     log.error('queue_update_failed')
+            elif appointment:
+                try:
+                    store.finish_appointment(appointment, 'retry', type(exc).__name__)
+                except Exception:
+                    log.error('appointment_queue_update_failed')
             time.sleep(5)
 
 

@@ -6,7 +6,8 @@ dans Flask : chaque traitement recharge les messages enregistrés dans Supabase.
 
 ## État vérifié le 23 octobre 2026
 
-- 37 tests locaux passent, avec dépendances externes simulées.
+- 43 tests locaux passent, dont le rapprochement sûr Calendar/Instagram, la
+  génération de fiches pré-appel et la résistance à une panne Notion.
 - Appel réel Anthropic réussi avec le `.env` existant.
 - Le projet Supabase est actif ; connexion, schéma et mémoire persistante validés.
 - Migrations 001 à 004 appliquées ; deux anciennes conversations importées.
@@ -85,7 +86,10 @@ Une valeur locale a été ajoutée pour l'authentification admin.
    pseudo, le nom et la photo Instagram dans les reprises humaines.
 8. Exécuter `migrations/006_structured_handoff.sql` pour conserver les faits utiles,
    la raison et l'heure d'une reprise humaine confirmée.
-9. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
+9. Exécuter `migrations/007_calendar_meeting_briefs.sql` pour ajouter les rendez-vous,
+   leur file de génération et les fiches pré-appel. Cette migration ne modifie ni
+   ne supprime les conversations existantes.
+10. Exécuter `python check_connections.py` : le contrôle de schéma doit réussir.
 
 La file enregistre les DMs avant acquittement HTTP. Une panne Supabase renvoie 503
 afin de permettre une nouvelle livraison. Les événements sont uniques par
@@ -123,6 +127,10 @@ L'ancien POST de simulation `/webhook` est remplacé par `/api/simulate` authent
 | GET `/api/handoffs` | Bearer admin | File des conversations à reprendre humainement |
 | GET `/api/conversations/<id>` | Bearer admin | Profil et transcription complète d'une conversation |
 | POST `/api/conversations/<id>/handoff` | Bearer admin | `{ "human_required": true/false }` |
+| POST `/api/calendar/events` | Bearer Calendar | Réception idempotente d'une réservation Google |
+| GET `/api/appointments` | Bearer admin | Liste des rendez-vous et état de leur fiche |
+| GET `/api/appointments/<id>` | Bearer admin | Fiche, rendez-vous et conversation source |
+| POST `/api/appointments/<id>/link` | Bearer admin | Rattachement manuel sûr d'un rendez-vous non identifié |
 | GET `/webhook` | Token Meta | Vérification du challenge |
 | POST `/webhook` | Signature Meta | DMs officiels |
 
@@ -187,6 +195,36 @@ de plus de 23 heures dans la file ne sont pas envoyés automatiquement. Ne pas
 revendiquer une garantie universelle de livraison exactement une fois : Meta ne
 fournit pas ici une clé d'idempotence de bout en bout.
 
+## Rendez-vous et fiches pré-appel
+
+Le relais `integrations/google_calendar_apps_script.js` tourne dans le cloud Google,
+donc l'ordinateur peut rester éteint. Un déclencheur Calendar transmet uniquement les
+événements dont le titre ou la description contient le marqueur de réservation Alterys.
+Le backend rapproche la réservation avec Supabase par identifiant de conversation,
+pseudo Instagram exact ou email exact et unique. En cas d'ambiguïté, le rendez-vous
+passe en `unmatched` : aucune conversation n'est devinée.
+
+Le worker construit ensuite une fiche avec le profil Instagram réel, la date, le lien
+Meet, les faits explicitement écrits par le prospect, les informations manquantes et
+un plan d'appel. Les messages générés par l'assistant ne sont jamais considérés comme
+des preuves sur le prospect. La fiche complète reste dans Supabase même si la copie
+vers Notion échoue.
+
+Pour activer le relais :
+
+1. appliquer la migration 007 et déployer le code ;
+2. définir le même `CALENDAR_INGEST_KEY` dans Render et dans les propriétés du script ;
+3. créer un projet Apps Script, y coller le fichier d'intégration et activer le service
+   avancé Google Calendar ;
+4. définir `BACKEND_URL`, `CALENDAR_ID`, `ACCOUNT_ID`, `INGEST_KEY` et
+   `BOOKING_TITLE_MARKER`, puis exécuter `setup()` une seule fois ;
+5. autoriser le script avec le compte Google `alterys.agency@gmail.com`.
+
+La synchronisation Notion est facultative. Elle nécessite une intégration Notion
+interne partagée avec la base « Rendez-vous & fiches d’appel », puis
+`NOTION_API_TOKEN` et `NOTION_MEETINGS_DATA_SOURCE_ID` dans Render. La connexion Notion
+de Codex ne donne pas automatiquement cet accès au serveur.
+
 Logs sans contenu des DMs, clés ni corps des erreurs fournisseurs. Pas de logs
 HTTP détaillés en production. Pas de RAG/vectorisation, réservation, stock réel,
 interface SaaS ni tool calling livrés : ces extensions doivent suivre la
@@ -234,5 +272,6 @@ préparé et testé localement, avec intégration externe en attente.
 
 ## Étapes externes restantes
 
-1. Pour une utilisation commerciale continue, remplacer l'instance Render gratuite
+1. Activer le relais Calendar et la synchronisation Notion décrits ci-dessus.
+2. Pour une utilisation commerciale continue, remplacer l'instance Render gratuite
    (qui s'endort après une période d'inactivité) par un service toujours actif.

@@ -1,6 +1,7 @@
 """Flask backend: durable Supabase memory and verified Meta webhook."""
 import hashlib
 import hmac
+import json
 import logging
 import os
 from functools import wraps
@@ -30,6 +31,15 @@ def create_app(store=None):
                 return jsonify(error='Unauthorized'), 401
             return fn(*args, **kwargs)
         return wrapped
+    def calendar_ingest(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            token = os.getenv('CALENDAR_INGEST_KEY', '')
+            supplied = request.headers.get('Authorization', '')
+            if not token or not hmac.compare_digest(supplied, 'Bearer ' + token):
+                return jsonify(error='Unauthorized'), 401
+            return fn(*args, **kwargs)
+        return wrapped
     def body():
         data = request.get_json()
         if not isinstance(data, dict):
@@ -40,6 +50,26 @@ def create_app(store=None):
         if not isinstance(value, str) or not value.strip() or len(value) > limit:
             raise InputError('Invalid ' + name)
         return value.strip()
+    def optional_field(data, name, limit=2000):
+        value = data.get(name)
+        if value is None or value == '':
+            return None
+        if not isinstance(value, str) or len(value) > limit:
+            raise InputError('Invalid ' + name)
+        return value.strip()
+    def iso_datetime(data, name, required=True):
+        value = optional_field(data, name, 100)
+        if value is None and not required:
+            return None
+        if value is None:
+            raise InputError('Invalid ' + name)
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            raise InputError('Invalid ' + name)
+        if parsed.tzinfo is None:
+            raise InputError(name + ' must include timezone')
+        return parsed.isoformat()
     @app.errorhandler(Exception)
     def error(exc):
         if isinstance(exc, HTTPException):
@@ -132,6 +162,77 @@ def create_app(store=None):
             return jsonify(store.conversation_detail(conversation_id))
         except (IndexError, KeyError):
             return jsonify(error='Unknown conversation'), 404
+    @app.post('/api/calendar/events')
+    @calendar_ingest
+    def calendar_event():
+        data = body()
+        account_id = field(data, 'account_id', 200)
+        if not store.account(account_id):
+            return jsonify(error='Unknown business'), 404
+        payload = data.get('event_payload') or {}
+        if not isinstance(payload, dict) or len(json.dumps(payload, ensure_ascii=False)) > 50000:
+            raise InputError('Invalid event_payload')
+        start_at = iso_datetime(data, 'start_at')
+        end_at = iso_datetime(data, 'end_at')
+        if datetime.fromisoformat(end_at) <= datetime.fromisoformat(start_at):
+            raise InputError('end_at must be after start_at')
+        external_status = optional_field(data, 'status', 30) or 'confirmed'
+        if external_status not in ('confirmed', 'tentative', 'cancelled'):
+            raise InputError('Invalid status')
+        conversation, match_method = store.match_conversation(
+            account_id,
+            conversation_id=optional_field(data, 'conversation_id', 200),
+            instagram_username=optional_field(data, 'instagram_username', 200),
+            attendee_email=optional_field(data, 'attendee_email', 300),
+        )
+        values = {
+            'account_id': account_id,
+            'conversation_id': conversation.get('id') if conversation else None,
+            'provider': 'google',
+            'external_id': field(data, 'external_id', 500),
+            'status': 'cancelled' if external_status == 'cancelled' else 'pending',
+            'title': field(data, 'title', 500),
+            'start_at': start_at, 'end_at': end_at,
+            'timezone': optional_field(data, 'timezone', 100),
+            'attendee_name': optional_field(data, 'attendee_name', 300),
+            'attendee_email': optional_field(data, 'attendee_email', 300),
+            'instagram_username': optional_field(data, 'instagram_username', 200),
+            'match_method': match_method,
+            'meeting_url': optional_field(data, 'meeting_url', 2000),
+            'event_url': optional_field(data, 'event_url', 2000),
+            'event_payload': payload,
+            'source_updated_at': iso_datetime(data, 'source_updated_at', required=False),
+        }
+        result = store.upsert_appointment(values)
+        return jsonify(appointment_id=result['id'], status=result['status'],
+                       matched=bool(result.get('conversation_id'))), 202
+    @app.get('/api/appointments')
+    @admin
+    def appointments():
+        status_filter = request.args.get('status')
+        allowed = {'pending','processing','retry','ready','unmatched','cancelled','failed'}
+        if status_filter and status_filter not in allowed:
+            raise InputError('Invalid status')
+        return jsonify(items=store.appointments(status_filter))
+    @app.get('/api/appointments/<appointment_id>')
+    @admin
+    def appointment_detail(appointment_id):
+        try:
+            return jsonify(store.appointment_detail(appointment_id))
+        except (IndexError, KeyError):
+            return jsonify(error='Unknown appointment'), 404
+    @app.post('/api/appointments/<appointment_id>/link')
+    @admin
+    def appointment_link(appointment_id):
+        data = body()
+        try:
+            result = store.link_appointment(
+                appointment_id, field(data, 'conversation_id', 200))
+        except IndexError:
+            return jsonify(error='Unknown appointment'), 404
+        except ValueError as exc:
+            raise InputError(str(exc))
+        return jsonify(appointment_id=result['id'], status=result['status'])
     @app.get('/webhook')
     def verify():
         token = os.getenv('META_VERIFY_TOKEN', '')
