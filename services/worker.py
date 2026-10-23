@@ -10,7 +10,7 @@ import requests
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from services.agent_policy import (build_system_prompt, contact_consent_reply,
-                                   critical_reply, extract_lead_data,
+                                   critical_reply, extract_lead_data, greeting_reply,
                                    guard_assistant_reply, normalize_reply)
 from services.store import Store
 
@@ -39,17 +39,24 @@ def handoff_requested(history):
     ])
     if direct:
         return True
-    confirmation = re.fullmatch(
-        r"(?:oui|ok|d'accord|je veux bien|vas[ -]?y|yes)(?:\s+(?:merci|svp|s'il vous pla[iî]t|please))?",
-        current,
-    )
-    if not confirmation or len(history) < 2 or history[-2]['role'] != 'assistant':
+    if len(history) < 2 or history[-2]['role'] != 'assistant':
         return False
     previous = history[-2]['content'].casefold()
-    return any(phrase in previous for phrase in
-               ['souhaitez-vous que je transmette', 'mettre en relation',
-                'transmettre votre demande', 'enregistre maintenant cette demande',
-                'enregistrer maintenant cette demande'])
+    consent_question = any(phrase in previous for phrase in
+                           ['souhaitez-vous que je transmette', 'mettre en relation',
+                            'transmettre votre demande', 'enregistre maintenant cette demande',
+                            'enregistrer maintenant cette demande'])
+    if not consent_question:
+        return False
+    # Instagram replies are often informal and contain extra words. Once the
+    # assistant has asked the explicit consent question, an affirmative opening
+    # is enough; a negative or postponement still wins.
+    affirmative = re.match(
+        r"^(?:(?:bah|ben)\s+)?(?:oui|ok|okay|d'accord|dac|je veux bien|vas[ -]?y|yes)\b",
+        plain,
+    )
+    negative = re.search(r"\b(?:non|pas maintenant|plus tard|finalement pas)\b", plain)
+    return bool(affirmative and not negative)
 
 
 def fetch_instagram_profile(account, sender_id):
@@ -105,7 +112,7 @@ def process(store, event, llm=None, send=None, profile_lookup=None):
             return
     response = event.get('response')
     if not response:
-        response = contact_consent_reply(history) or critical_reply(history)
+        response = contact_consent_reply(history) or critical_reply(history) or greeting_reply(history)
         if response is None:
             if llm is None:
                 llm = Anthropic(timeout=40, max_retries=2)

@@ -17,8 +17,11 @@ prospect, de comprendre son besoin et de faciliter la prochaine étape commercia
 2. Écris en français naturel, chaleureux et direct. Vouvoie toujours le prospect,
    sauf s'il demande explicitement le tutoiement. Fais 2 à 5 phrases courtes,
    650 caractères maximum. Utilise au plus un emoji et une seule question par réponse.
+   À un simple message de salutation, réponds en une seule phrase, sans te présenter
+   ni réciter les services de l'agence.
 3. Ne répète ni le message précédent ni une formule d'accueil déjà utilisée.
-   N'ajoute pas systématiquement « merci », « parfait » ou un emoji.
+   N'utilise pas « bien noté », « merci », « parfait » ou un emoji plus d'une fois
+   dans la même conversation.
 4. Après la réponse, pose seulement la prochaine question de qualification la plus
    utile qui n'a pas encore reçu de réponse : volume approximatif de DM, questions
    fréquentes, réponse exacte à chacune de ces questions, actions souhaitées,
@@ -81,8 +84,8 @@ HOW_RE = re.compile(
 EMAIL_RE = re.compile(r'(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+', re.IGNORECASE)
 PHONE_RE = re.compile(r'(?<!\d)(?:\+?33|0)[1-9](?:[ .-]?\d{2}){4}(?!\d)')
 HANDOFF_CLAIM_RE = re.compile(
-    r"(?:j['’]ai|nous avons)\s+(?:bien\s+)?(?:transmis|enregistr[ée]|not[ée])|"
-    r"(?:votre\s+)?demande\s+(?:est|sera)\s+(?:bien\s+)?(?:not[ée]e?|transmise|suivie|[ée]tudi[ée]e?)|"
+    r"(?:j['’]ai|nous avons|j['’]enregistre|je note)\s+(?:bien\s+)?(?:transmis|enregistr[ée]e?|not[ée]e?)|"
+    r"(?:votre\s+)?demande\s+(?:est|sera)\s+(?:bien\s+)?(?:enregistr[ée]e?|not[ée]e?|transmise|suivie|[ée]tudi[ée]e?)|"
     r"(?:une personne|un membre|l['’][ée]quipe).{0,80}"
     r"(?:va|vont|pourra|reviend|reprend|recontact|contact|[ée]tudi|suiv)",
     re.IGNORECASE,
@@ -99,6 +102,16 @@ def build_system_prompt(account_prompt):
     return (account_prompt or '').strip() + QUALITY_PROMPT
 
 
+def greeting_reply(history):
+    """Keep the first contact brief and avoid paying for a generic greeting."""
+    if len(history) != 1 or history[0].get('role') != 'user':
+        return None
+    message = history[0].get('content', '').strip().casefold()
+    if re.fullmatch(r'(?:bonjour|bonsoir|salut|hello|coucou)[ !?.]*', message):
+        return 'Bonjour ! Comment puis-je vous aider ?'
+    return None
+
+
 def extract_lead_data(history):
     """Extract only explicit prospect facts; never infer missing business data."""
     user_texts = [item.get('content', '') for item in history if item.get('role') == 'user']
@@ -108,6 +121,17 @@ def extract_lead_data(history):
     volume = re.search(r'\b(\d+)\s*(?:dm|messages?)\s*(?:par|/)\s*(jour|semaine|mois)\b', joined, re.I)
     if volume:
         data['dm_volume'] = f'{volume.group(1)} par {volume.group(2).lower()}'
+    # Understand short answers by using the immediately preceding question.
+    for index, item in enumerate(history):
+        if item.get('role') != 'user' or index == 0 or history[index - 1].get('role') != 'assistant':
+            continue
+        answer = item.get('content', '')
+        question = history[index - 1].get('content', '')
+        if 'dm_volume' not in data and re.search(r'\b(?:volume|combien)\b.{0,60}\b(?:dm|messages?)\b', question, re.I):
+            short_volume = re.search(r'\b(\d+)\b', answer)
+            period = re.search(r'\b(jour|semaine|mois)\b', question, re.I)
+            if short_volume and period:
+                data['dm_volume'] = f'{short_volume.group(1)} par {period.group(1).lower()}'
     prices = re.findall(r'\b\d+(?:[.,]\d+)?\s*(?:€|euros?)\b', joined, re.I)
     if prices:
         data['prospect_prices'] = list(dict.fromkeys(prices))[:5]
@@ -118,6 +142,14 @@ def extract_lead_data(history):
     deadlines = re.findall(r'\b(?:dans|en|sous)\s+\d+\s*(?:jours?|semaines?|mois)\b', joined, re.I)
     if deadlines:
         data['desired_deadline'] = deadlines[-1]
+    if 'desired_deadline' not in data:
+        for index, item in enumerate(history):
+            if item.get('role') != 'user' or index == 0 or history[index - 1].get('role') != 'assistant':
+                continue
+            if re.search(r'\b(?:d[ée]lai|mise en place|quand)\b', history[index - 1].get('content', ''), re.I):
+                deadline = re.search(r'\b\d+\s*(?:jours?|semaines?|mois)\b', item.get('content', ''), re.I)
+                if deadline:
+                    data['desired_deadline'] = deadline.group(0).lower()
     emails = EMAIL_RE.findall(joined)
     if emails:
         data['contact_email'] = emails[-1]
@@ -125,12 +157,22 @@ def extract_lead_data(history):
     if phones:
         data['contact_phone'] = phones[-1]
     if re.search(
-        r'(?:\b(?:contact|recontact|joindre|écrire|répondre)\w*\b.{0,40}\b(?:dm|instagram)\b)|'
-        r'(?:^|[.!?]\s*)(?:par\s+)?(?:dm|instagram)(?:\s+(?:ou|et)\s+(?:email|e-mail))?(?:[.!?]|$)',
+        r'(?:\b(?:contact|recontact|joindre|écrire|répondre)\w*\b.{0,40}\b(?:dm|instagram|insta)\b)|'
+        r'(?:^|[.!?]\s*)(?:par\s+)?(?:dm|instagram|insta)(?:\s+(?:ou|et)\s+(?:email|e-mail))?(?:[.!?]|$)',
         joined,
         re.I,
     ):
         data['instagram_contact_ok'] = True
+    if 'instagram_contact_ok' not in data:
+        for index, item in enumerate(history):
+            if item.get('role') != 'user' or index == 0 or history[index - 1].get('role') != 'assistant':
+                continue
+            question = history[index - 1].get('content', '')
+            answer = item.get('content', '')
+            if (re.search(r'\b(?:contact|recontacter|moyen)\b', question, re.I)
+                    and re.search(r'\b(?:dm|instagram|insta)\b', answer, re.I)):
+                data['instagram_contact_ok'] = True
+                break
     topics = []
     for label, pattern in [
         ('prix', r'\b(?:prix|tarifs?)\b'), ('délais', r'\b(?:d[ée]lais?|temps que .{0,10}prend)\b'),
@@ -143,6 +185,15 @@ def extract_lead_data(history):
             topics.append(label)
     if topics:
         data['topics'] = topics
+    if re.search(r'\b(?:cr[ée]ation|cr[ée]er)\b.{0,40}\bsites?\s+web\b|\bsites?\s+web\b.{0,30}\bhtml\b', joined, re.I):
+        data['business_activity'] = 'création de sites web HTML'
+    updates = re.search(
+        r'\b(\d+)\s+mises?\s*[àa]\s*jours?\b.{0,30}\b(?:inclus(?:e|es)?|compris(?:e|es)?)\b',
+        joined,
+        re.I,
+    )
+    if updates:
+        data['included_updates'] = int(updates.group(1))
     if re.search(
         r'\b(?:pr[ée]ven\w*|validation|valider).{0,60}(?:lien|paiement)\b|'
         r'\b(?:lien|paiement).{0,60}(?:apr[eè]s|avec|seulement).{0,30}(?:validation|valid\w*)\b',
@@ -157,12 +208,18 @@ def extract_lead_data(history):
 def lead_summary(history):
     data = extract_lead_data(history)
     facts = []
+    if data.get('business_activity'):
+        facts.append('activité : ' + data['business_activity'])
     if data.get('dm_volume'):
-        facts.append(f"volume : {data['dm_volume']} DM")
+        amount, separator, period = data['dm_volume'].partition(' par ')
+        facts.append(f"volume : {amount} DM par {period}" if separator
+                     else f"volume : {data['dm_volume']} DM")
     if data.get('topics'):
         facts.append('besoins : ' + ', '.join(data['topics']))
     if data.get('prospect_prices'):
         facts.append('prix communiqué par le prospect : ' + ', '.join(data['prospect_prices']))
+    if data.get('included_updates') is not None:
+        facts.append(f"offre : {data['included_updates']} mise à jour incluse")
     if data.get('tools'):
         facts.append('outils : ' + ', '.join(data['tools']))
     if data.get('desired_deadline'):
@@ -191,7 +248,7 @@ def contact_consent_reply(history):
         return None
     current = history[-1].get('content', '')
     has_contact = bool(EMAIL_RE.search(current) or PHONE_RE.search(current)
-                       or re.search(r'\b(?:dm|instagram|whatsapp)\b', current, re.I))
+                       or re.search(r'\b(?:dm|instagram|insta|whatsapp)\b', current, re.I))
     if has_contact and CONTACT_ASK_RE.search(history[-2].get('content', '')):
         return consent_request(history)
     return None

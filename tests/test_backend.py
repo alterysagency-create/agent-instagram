@@ -12,8 +12,8 @@ import requests
 from app import create_app
 from services.worker import process
 from services.agent_policy import (contact_consent_reply, critical_reply,
-                                   extract_lead_data, guard_assistant_reply,
-                                   normalize_reply)
+                                   extract_lead_data, greeting_reply, guard_assistant_reply,
+                                   lead_summary, normalize_reply)
 
 
 class FakeStore:
@@ -162,7 +162,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(llm.calls, [])
         self.assertFalse(self.store.conversation(cid)['human_required'])
         self.assertIn('Souhaitez-vous que j’enregistre', e['response'])
-        self.assertIn('50 par semaine', e['response'])
+        self.assertIn('50 DM par semaine', e['response'])
         self.assertNotIn('test@example.com', e['response'])
     def test_natural_contact_question_triggers_deterministic_consent(self):
         history = [
@@ -190,6 +190,19 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(conversation['lead_data']['dm_volume'], '50 par semaine')
         self.assertIn('stripe', conversation['lead_data']['tools'])
         self.assertEqual(conversation['handoff_reason'], 'client_confirmed')
+    def test_informal_confirmation_after_consent_creates_handoff(self):
+        cid = 'a:u'
+        self.store.conversations[cid] = dict(id=cid, account_id='a', sender_id='u',
+                                             human_required=False, lead_data={})
+        self.store.messages[cid] = [
+            dict(role='user', content='Je reçois 50 DM par semaine.'),
+            dict(role='assistant', content="Souhaitez-vous que j’enregistre maintenant cette demande dans la file de suivi de l’agence ?"),
+        ]
+        e=self.store.enqueue('a','u','Bah oui jsp c quoi les options','1','simulation');self.store.start(e)
+        llm=LLM();process(self.store,e,llm)
+        self.assertEqual(llm.calls, [])
+        self.assertTrue(self.store.conversation(cid)['human_required'])
+        self.assertIn('file de suivi', e['response'])
     def test_generated_false_handoff_claim_requests_missing_contact(self):
         e=self.store.enqueue('a','u','Voici mon projet','1','simulation');self.store.start(e)
         llm=LLM("Une personne de l'équipe va étudier votre demande et vous recontacter.")
@@ -209,6 +222,7 @@ class BackendTests(unittest.TestCase):
         for unsafe in [
             "Une personne de l'équipe reviendra vers vous.",
             "Je l'enregistre pour qu'une personne de l'équipe l'étudie.",
+            "Votre demande est enregistrée dans la file de suivi.",
         ]:
             response = guard_assistant_reply(history, unsafe)
             self.assertIn('Souhaitez-vous que j’enregistre', response)
@@ -233,6 +247,13 @@ class BackendTests(unittest.TestCase):
         self.assertIn('jamais votre mot de passe', e['response'])
         self.assertIn('autorisation officielle de Meta', e['response'])
         self.assertIn('combien de DM', e['response'])
+    def test_first_greeting_is_short_and_deterministic(self):
+        history = [dict(role='user', content='Bonjour')]
+        self.assertEqual(greeting_reply(history), 'Bonjour ! Comment puis-je vous aider ?')
+        e=self.store.enqueue('a','u','Bonjour','1','simulation');self.store.start(e)
+        llm=LLM();process(self.store,e,llm)
+        self.assertEqual(llm.calls, [])
+        self.assertEqual(e['response'], 'Bonjour ! Comment puis-je vous aider ?')
     def test_multipart_critical_question_answers_every_part(self):
         message = "Quels sont vos tarifs, comment fonctionne l'automatisation et faut-il donner mes accès Insta ?"
         response = critical_reply([dict(role='user', content=message)])
@@ -255,6 +276,25 @@ class BackendTests(unittest.TestCase):
         reverse = extract_lead_data([dict(role='user', content=
             'Envoyer un lien Stripe seulement après ma validation.')])
         self.assertTrue(reverse['manual_approval_before_payment_link'])
+    def test_short_answers_are_extracted_from_question_context(self):
+        history = [
+            dict(role='user', content='Je crée des sites web HTML.'),
+            dict(role='assistant', content='Quel volume de DM recevez-vous par semaine ?'),
+            dict(role='user', content='50'),
+            dict(role='assistant', content='Quel délai souhaitez-vous pour la mise en place ?'),
+            dict(role='user', content='1 semaine pas plus'),
+            dict(role='assistant', content='Quel moyen de contact préférez-vous ?'),
+            dict(role='user', content='DM insta'),
+            dict(role='assistant', content='La mise à jour est-elle incluse ?'),
+            dict(role='user', content='500 euros et il y a 1 mise à jour incluse'),
+        ]
+        data = extract_lead_data(history)
+        self.assertEqual(data['dm_volume'], '50 par semaine')
+        self.assertEqual(data['desired_deadline'], '1 semaine')
+        self.assertTrue(data['instagram_contact_ok'])
+        self.assertEqual(data['business_activity'], 'création de sites web HTML')
+        self.assertEqual(data['included_updates'], 1)
+        self.assertIn('volume : 50 DM par semaine', lead_summary(history))
     def test_instagram_topic_is_not_mistaken_for_contact_preference(self):
         data = extract_lead_data([dict(role='user', content=
             'Je veux automatiser mes DM Instagram et je reçois 50 DM par semaine.')])
