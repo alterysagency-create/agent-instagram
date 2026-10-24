@@ -18,8 +18,16 @@ FAITS VALIDÉS
   connexions nécessaires et du niveau d'accompagnement.
 
 Ne présente jamais comme déjà disponible une fonction qui n'est pas mentionnée
-ci-dessus. Pour une réservation, un paiement, un CRM ou une autre intégration,
-explique que la faisabilité doit être étudiée selon l'outil du prospect."""
+ci-dessus. Pour un paiement, un CRM ou une autre intégration non décrite,
+explique que la faisabilité doit être étudiée selon l'outil du prospect.
+
+RENDEZ-VOUS
+- Si le prospect demande un rendez-vous, ou si son besoin est suffisamment qualifié
+  et qu'il souhaite avancer, propose le lien de réservation fourni ci-dessous.
+- Ne donne pas le lien trop tôt et ne le répète pas à chaque message.
+- Le formulaire demande le pseudo Instagram et le besoin principal.
+- Ne dis jamais qu'un rendez-vous est confirmé uniquement parce que le prospect
+  affirme avoir réservé : la confirmation officielle vient de Google Calendar."""
 
 
 def main():
@@ -29,7 +37,17 @@ def main():
     rows = table.select('id').eq('instagram_handle', '@alterys.agency').execute().data
     if len(rows) != 1:
         raise RuntimeError(f'Expected one Alterys account, found {len(rows)}')
-    table.update({'system_prompt': ALTERYS_PROMPT}).eq('id', rows[0]['id']).execute()
+    booking_url = os.getenv('GOOGLE_APPOINTMENT_SCHEDULE_URL', '').strip()
+    calendar_id = os.getenv('GOOGLE_CALENDAR_ID', '').strip()
+    prompt = ALTERYS_PROMPT
+    if booking_url:
+        prompt += '\n\nLien officiel de réservation : ' + booking_url
+    values = {'system_prompt': prompt}
+    if booking_url:
+        values['booking_url'] = booking_url
+    if calendar_id:
+        values['calendar_id'] = calendar_id
+    table.update(values).eq('id', rows[0]['id']).execute()
     print('Alterys business facts: OK')
 
 
