@@ -14,6 +14,7 @@ from services.worker import process, process_appointment
 from services.agent_policy import (contact_consent_reply, critical_reply,
                                    extract_lead_data, greeting_reply, guard_assistant_reply,
                                    lead_summary, normalize_reply)
+from services.notion_sync import _paragraph_blocks, _properties as notion_properties
 
 
 class FakeStore:
@@ -506,6 +507,26 @@ class BackendTests(unittest.TestCase):
         process_appointment(self.store, appointment, LLM(answer), notion_sync=broken_sync)
         self.assertEqual(appointment['status'], 'ready')
         self.assertEqual(appointment['notion_sync_error'], 'ConnectionError')
+    def test_notion_payload_matches_meetings_database_schema(self):
+        appointment = dict(
+            external_id='google-schema', status='ready',
+            start_at='2026-10-25T14:00:00Z', end_at='2026-10-25T14:30:00Z',
+            meeting_url='https://meet.google.com/test')
+        brief = {
+            'prospect': {
+                'instagram_username': 'client_test', 'attendee_name': 'Client Test',
+                'attendee_email': 'client@example.com', 'business_activity': 'Formation'},
+            'analysis': {
+                'summary': 'Résumé', 'main_need': 'Besoin', 'pain_points': [],
+                'objections': [], 'missing_information': [], 'recommended_agenda': []}}
+        properties = notion_properties(appointment, brief, 'ready')
+        self.assertEqual(properties['Statut'], {'status': {'name': 'Prêt'}})
+        self.assertEqual(properties['Responsable'], {'select': {'name': 'Ensemble'}})
+        self.assertIn('préparer', properties['Prochaine étape']['rich_text'][0]['text']['content'])
+        blocks = _paragraph_blocks('x' * 4000)
+        self.assertEqual(len(blocks), 3)
+        self.assertEqual(sum(len(block['paragraph']['rich_text'][0]['text']['content'])
+                             for block in blocks), 4000)
     def test_send_timeout_no_resend(self):
         e=self.store.enqueue('a','u','Bonjour','1','instagram');self.store.start(e)
         def send(*args): raise requests.Timeout()

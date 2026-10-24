@@ -17,6 +17,16 @@ def _join(values):
     return '\n'.join('• ' + str(value) for value in (values or []))
 
 
+def _paragraph_blocks(value):
+    """Keep the complete brief while respecting Notion's rich-text size limit."""
+    value = str(value or '').strip()
+    return [
+        {'object': 'block', 'type': 'paragraph',
+         'paragraph': {'rich_text': _text(value[index:index + 1900], 1900)}}
+        for index in range(0, len(value), 1900)
+    ]
+
+
 def _properties(appointment, brief, status):
     prospect = brief['prospect']
     analysis = brief['analysis']
@@ -26,7 +36,7 @@ def _properties(appointment, brief, status):
     title = f"Appel — {str(title).lstrip('@')}"
     properties = {
         'Rendez-vous': {'title': _text(title, 250)},
-        'Statut': {'select': {'name': {
+        'Statut': {'status': {'name': {
             'ready': 'Prêt', 'unmatched': 'À identifier',
             'cancelled': 'Annulé', 'processing': 'À préparer',
         }.get(status, 'À préparer')}},
@@ -43,6 +53,10 @@ def _properties(appointment, brief, status):
         'Objections': {'rich_text': _text(_join(analysis.get('objections')))},
         'Informations manquantes': {'rich_text': _text(_join(analysis.get('missing_information')))},
         'Plan d’appel conseillé': {'rich_text': _text(_join(analysis.get('recommended_agenda')))},
+        'Prochaine étape': {'rich_text': _text(
+            'Identifier la conversation Instagram' if status == 'unmatched'
+            else 'Lire la fiche puis préparer les questions de l’appel')},
+        'Responsable': {'select': {'name': 'Ensemble'}},
         'Dernière génération': {'date': {'start': datetime.now(timezone.utc).isoformat()}},
     }
     return properties
@@ -73,9 +87,7 @@ def sync_appointment(appointment, brief, brief_text):
             }},
             {'object': 'block', 'type': 'heading_2',
              'heading_2': {'rich_text': _text('Fiche complète')}},
-            {'object': 'block', 'type': 'paragraph',
-             'paragraph': {'rich_text': _text(brief_text, 1900)}},
-        ]
+        ] + _paragraph_blocks(brief_text)
         response = requests.post('https://api.notion.com/v1/pages', headers=headers,
                                  json=payload, timeout=(5, 20))
     response.raise_for_status()
