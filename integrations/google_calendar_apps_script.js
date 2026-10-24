@@ -4,6 +4,7 @@
  * Store configuration in Project Settings > Script properties:
  *   BACKEND_URL, CALENDAR_ID, ACCOUNT_ID, INGEST_KEY, BOOKING_TITLE_MARKER
  * Optional: INSTAGRAM_FIELD_LABEL (default: "Votre @ Instagram")
+ *           BOOKING_NEED_FIELD_LABEL
  */
 
 function setup() {
@@ -78,7 +79,9 @@ function getConfig_() {
     accountId: p.ACCOUNT_ID,
     ingestKey: p.INGEST_KEY,
     titleMarker: p.BOOKING_TITLE_MARKER,
-    usernameLabel: p.INSTAGRAM_FIELD_LABEL || 'Votre @ Instagram'
+    usernameLabel: p.INSTAGRAM_FIELD_LABEL || 'Votre @ Instagram',
+    bookingNeedLabel: p.BOOKING_NEED_FIELD_LABEL ||
+      'Décrivez votre activité et votre besoin principal'
   };
 }
 
@@ -96,12 +99,34 @@ function firstExternalAttendee_(event) {
   return attendees.find(function (item) { return !item.self && !item.resource; }) || {};
 }
 
-function instagramUsername_(description, label) {
+function plainText_(description) {
+  return String(description || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/gi, '"');
+}
+
+function formAnswer_(description, label) {
+  const text = plainText_(description);
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const labeled = new RegExp(escaped + '\\s*[:\\-]\\s*@?([A-Za-z0-9._]{1,30})', 'i')
-    .exec(description || '');
+  const labeled = new RegExp(
+    '(?:^|\\n)\\s*' + escaped + '\\s*[:\\-]\\s*(.+?)(?=\\n\\s*[^\\n:]+\\s*[:\\-]|$)',
+    'is').exec(text);
+  return labeled ? labeled[1].trim() : null;
+}
+
+function instagramUsername_(description, label) {
+  const answer = formAnswer_(description, label) || '';
+  const labeled = /^@?([A-Za-z0-9._]{1,30})/.exec(answer);
   if (labeled) return labeled[1];
-  const generic = /(?:instagram|insta)\s*[:\-]\s*@?([A-Za-z0-9._]{1,30})/i.exec(description || '');
+  const generic = /(?:instagram|insta)\s*[:\-]\s*@?([A-Za-z0-9._]{1,30})/i
+    .exec(plainText_(description));
   return generic ? generic[1] : null;
 }
 
@@ -131,7 +156,11 @@ function sendEvent_(event, config) {
     event_payload: {
       creator_email: event.creator && event.creator.email || null,
       organizer_email: event.organizer && event.organizer.email || null,
-      description: (event.description || '').slice(0, 5000)
+      description: (event.description || '').slice(0, 5000),
+      description_text: plainText_(event.description).slice(0, 5000),
+      booking_answers: {
+        need: formAnswer_(event.description, config.bookingNeedLabel)
+      }
     }
   };
   if (!payload.start_at || !payload.end_at) return;

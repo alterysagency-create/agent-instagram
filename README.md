@@ -217,7 +217,9 @@ Pour activer le relais :
 3. créer un projet Apps Script, y coller le fichier d'intégration et activer le service
    avancé Google Calendar ;
 4. définir `BACKEND_URL`, `CALENDAR_ID`, `ACCOUNT_ID`, `INGEST_KEY` et
-   `BOOKING_TITLE_MARKER`, puis exécuter `setup()` une seule fois ;
+   `BOOKING_TITLE_MARKER`, puis exécuter `setup()` une seule fois. Les propriétés
+   facultatives `INSTAGRAM_FIELD_LABEL` et `BOOKING_NEED_FIELD_LABEL` permettent
+   d'adapter exactement les libellés du formulaire Google Calendar ;
 5. autoriser le script avec le compte Google `alterys.agency@gmail.com`.
 
 La synchronisation Notion est facultative. Elle nécessite une intégration Notion
@@ -226,7 +228,7 @@ interne partagée avec la base « Rendez-vous & fiches d’appel », puis
 de Codex ne donne pas automatiquement cet accès au serveur.
 
 Logs sans contenu des DMs, clés ni corps des erreurs fournisseurs. Pas de logs
-HTTP détaillés en production. Pas de RAG/vectorisation, réservation, stock réel,
+HTTP détaillés en production. Pas de RAG/vectorisation, stock réel,
 interface SaaS ni tool calling livrés : ces extensions doivent suivre la
 validation du flux réel. L'ajout au prompt limite certains comportements mais
 ne constitue pas une protection garantie contre toute injection de prompt.

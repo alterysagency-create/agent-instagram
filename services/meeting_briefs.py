@@ -12,6 +12,8 @@ ANALYSIS_KEYS = (
     'missing_information', 'recommended_agenda', 'suggested_questions',
 )
 
+BOOKING_NEED_LABEL = 'Décrivez votre activité et votre besoin principal'
+
 
 def _clean(value, limit=1000):
     return re.sub(r'\s+', ' ', str(value or '')).strip()[:limit]
@@ -23,6 +25,27 @@ def _display_datetime(value):
         return parsed.strftime('%d/%m/%Y à %H:%M')
     except (TypeError, ValueError):
         return _clean(value, 100)
+
+
+def _booking_answer(appointment, label):
+    """Read one Google appointment-form answer without interpreting it."""
+    payload = appointment.get('event_payload') or {}
+    if isinstance(payload, dict):
+        answers = payload.get('booking_answers') or {}
+        if label == BOOKING_NEED_LABEL and isinstance(answers, dict) and answers.get('need'):
+            return _clean(answers['need'], 1500)
+        description = payload.get('description_text') or payload.get('description', '')
+    else:
+        description = ''
+    if not isinstance(description, str):
+        return None
+    escaped = re.escape(label)
+    match = re.search(
+        rf'(?:^|\n)\s*{escaped}\s*[:\-]\s*(.+?)(?=\n\s*[^\n:]+\s*[:\-]|\Z)',
+        description,
+        re.I | re.S,
+    )
+    return _clean(match.group(1), 1500) if match else None
 
 
 def _model_payload(appointment, conversation, messages):
@@ -38,6 +61,7 @@ def _model_payload(appointment, conversation, messages):
             'start_at': appointment.get('start_at'),
             'attendee_name': _clean(appointment.get('attendee_name'), 200),
             'attendee_email': _clean(appointment.get('attendee_email'), 300),
+            'booking_need': _booking_answer(appointment, BOOKING_NEED_LABEL),
         },
         'instagram_profile': {
             'username': _clean((conversation or {}).get('sender_username'), 200),
@@ -97,6 +121,9 @@ def generate_brief(appointment, account, conversation, messages, llm):
     text = ''.join(block.text for block in result.content if block.type == 'text').strip()
     analysis = _parse_json(text)
     lead_data = extract_lead_data(messages)
+    booking_need = _booking_answer(appointment, BOOKING_NEED_LABEL)
+    if booking_need:
+        lead_data = dict(lead_data, booking_need=booking_need)
     username = _clean((conversation or {}).get('sender_username')
                       or appointment.get('instagram_username'), 200)
     brief = {
@@ -123,6 +150,7 @@ def generate_brief(appointment, account, conversation, messages, llm):
 
 
 def unmatched_brief(appointment):
+    booking_need = _booking_answer(appointment, BOOKING_NEED_LABEL)
     brief = {
         'prospect': {
             'instagram_username': _clean(appointment.get('instagram_username'), 200) or 'Non précisé',
@@ -135,10 +163,10 @@ def unmatched_brief(appointment):
             key: appointment.get(key) for key in
             ('title', 'start_at', 'end_at', 'timezone', 'meeting_url', 'event_url')
         },
-        'known_facts': {},
+        'known_facts': {'booking_need': booking_need} if booking_need else {},
         'analysis': {
             'summary': 'Réservation reçue, mais aucune conversation Instagram certaine ne correspond.',
-            'main_need': 'Non précisé',
+            'main_need': booking_need or 'Non précisé',
             'pain_points': [], 'objections': [],
             'missing_information': ['Conversation Instagram à identifier'],
             'recommended_agenda': [], 'suggested_questions': [],

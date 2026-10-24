@@ -455,6 +455,39 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(llm.calls, [])
         self.assertEqual(appointment['status'], 'unmatched')
         self.assertIn('aucune conversation Instagram certaine', brief['analysis']['summary'])
+    def test_booking_form_need_is_preserved_for_unmatched_appointment(self):
+        appointment = dict(
+            id='appointment-booking-answer', account_id='a', conversation_id=None,
+            external_id='google-booking-answer', status='processing',
+            title='Appel découverte Alterys',
+            start_at='2026-10-25T14:00:00Z', end_at='2026-10-25T14:30:00Z',
+            event_payload={'description': (
+                'Votre @ Instagram: client_test\n'
+                'Décrivez votre activité et votre besoin principal: '
+                'Je vends des formations et je veux automatiser les FAQ.\n'
+                'Autre champ: valeur')})
+        self.store.appointment_rows['a:google-booking-answer'] = appointment
+        brief = process_appointment(self.store, appointment, LLM(), notion_sync=False)
+        self.assertEqual(appointment['status'], 'unmatched')
+        self.assertEqual(
+            brief['analysis']['main_need'],
+            'Je vends des formations et je veux automatiser les FAQ.')
+        self.assertEqual(
+            brief['known_facts']['booking_need'],
+            'Je vends des formations et je veux automatiser les FAQ.')
+    def test_structured_booking_answer_takes_precedence_over_html_description(self):
+        appointment = dict(
+            id='appointment-structured-answer', account_id='a', conversation_id=None,
+            external_id='google-structured-answer', status='processing',
+            title='Appel découverte Alterys',
+            start_at='2026-10-25T14:00:00Z', end_at='2026-10-25T14:30:00Z',
+            event_payload={
+                'description': '<b>Texte HTML non fiable</b>',
+                'booking_answers': {'need': 'Automatiser les demandes de devis.'},
+            })
+        self.store.appointment_rows['a:google-structured-answer'] = appointment
+        brief = process_appointment(self.store, appointment, LLM(), notion_sync=False)
+        self.assertEqual(brief['analysis']['main_need'], 'Automatiser les demandes de devis.')
     def test_notion_failure_does_not_destroy_ready_brief(self):
         cid = 'a:ig-user'
         self.store.conversations[cid] = dict(
