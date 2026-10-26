@@ -113,7 +113,6 @@ def generate_brief(appointment, account, conversation, messages, llm):
         model=account.get('anthropic_model') or os.getenv(
             'ANTHROPIC_MODEL', 'claude-sonnet-5'),
         max_tokens=1200,
-        temperature=0,
         system=instruction,
         messages=[{'role': 'user', 'content': '<data>\n' + json.dumps(
             payload, ensure_ascii=False) + '\n</data>'}],
