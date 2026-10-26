@@ -185,8 +185,9 @@ def process_appointment(store, appointment, llm=None, notion_sync=None):
             page_id = sync(synced, brief, brief_text)
             store.save_notion_sync(appointment['id'], page_id=page_id)
         except (requests.RequestException, ValueError, KeyError) as exc:
-            log.warning('notion_sync_failed type=%s', type(exc).__name__)
-            store.save_notion_sync(appointment['id'], error=type(exc).__name__)
+            error_code = getattr(exc, 'safe_code', type(exc).__name__)
+            log.warning('notion_sync_failed code=%s', error_code)
+            store.save_notion_sync(appointment['id'], error=error_code)
     return brief
 
 

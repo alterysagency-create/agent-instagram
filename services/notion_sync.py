@@ -4,6 +4,14 @@ from datetime import datetime, timezone
 import requests
 
 
+class NotionSyncError(ValueError):
+    """A Notion failure reduced to a safe, non-secret diagnostic code."""
+
+    def __init__(self, status, code):
+        self.safe_code = f'NotionHTTP{status}:{code or "unknown"}'
+        super().__init__(self.safe_code)
+
+
 def configured():
     return bool(os.getenv('NOTION_API_TOKEN') and os.getenv('NOTION_MEETINGS_DATA_SOURCE_ID'))
 
@@ -90,7 +98,12 @@ def sync_appointment(appointment, brief, brief_text):
         ] + _paragraph_blocks(brief_text)
         response = requests.post('https://api.notion.com/v1/pages', headers=headers,
                                  json=payload, timeout=(5, 20))
-    response.raise_for_status()
+    if response.status_code >= 400:
+        try:
+            error_code = response.json().get('code')
+        except (ValueError, AttributeError):
+            error_code = None
+        raise NotionSyncError(response.status_code, error_code)
     result = response.json()
     if not isinstance(result, dict) or not result.get('id'):
         raise ValueError('Notion page acknowledgement missing')
