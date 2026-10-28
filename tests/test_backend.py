@@ -174,6 +174,37 @@ class BackendTests(unittest.TestCase):
                                   headers=self.calendar_auth)
         self.assertEqual(result.status_code, 202)
         self.assertFalse(result.json['matched'])
+    def test_cancelled_calendar_event_updates_existing_notion_page(self):
+        existing = dict(
+            id='appointment-cancel', account_id='a', conversation_id=None,
+            provider='google', external_id='google-cancel', status='ready',
+            title='Appel découverte Alterys', start_at='2026-10-29T18:00:00Z',
+            end_at='2026-10-29T18:30:00Z', notion_page_id='notion-page',
+            brief={
+                'prospect': {'instagram_username': 'client_test',
+                             'attendee_name': 'Client Test',
+                             'attendee_email': 'client@example.com',
+                             'business_activity': 'Formation'},
+                'analysis': {'summary': 'Résumé', 'main_need': 'Besoin',
+                             'pain_points': [], 'objections': [],
+                             'missing_information': [], 'recommended_agenda': []}},
+            brief_text='Fiche existante')
+        self.store.appointment_rows['a:google-cancel'] = existing
+        payload = dict(
+            account_id='a', external_id='google-cancel', status='cancelled',
+            title='Appel découverte Alterys',
+            start_at='2026-10-29T18:00:00Z', end_at='2026-10-29T18:30:00Z')
+        with patch('app.notion_configured', return_value=True), \
+                patch('app.sync_appointment', return_value='notion-page') as sync:
+            result = self.client.post('/api/calendar/events', json=payload,
+                                      headers=self.calendar_auth)
+        self.assertEqual(result.status_code, 202)
+        saved = self.store.appointment_rows['a:google-cancel']
+        self.assertEqual(saved['status'], 'cancelled')
+        sync.assert_called_once()
+        self.assertEqual(sync.call_args.args[0]['status'], 'cancelled')
+        self.assertEqual(saved['notion_page_id'], 'notion-page')
+        self.assertIsNone(saved['notion_sync_error'])
     def test_calendar_rejects_invalid_range(self):
         payload = dict(account_id='a', external_id='bad', title='Appel',
                        start_at='2026-10-25T15:00:00Z', end_at='2026-10-25T14:00:00Z')

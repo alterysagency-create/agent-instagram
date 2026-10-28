@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
+import requests
+from services.notion_sync import configured as notion_configured, sync_appointment
 from services.store import Store
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
@@ -204,6 +206,19 @@ def create_app(store=None):
             'source_updated_at': iso_datetime(data, 'source_updated_at', required=False),
         }
         result = store.upsert_appointment(values)
+        # Cancelled events do not enter the brief-generation queue. Mirror the
+        # cancellation immediately to an existing Notion page so it cannot
+        # remain incorrectly marked as ready.
+        if (result.get('status') == 'cancelled' and result.get('notion_page_id')
+                and result.get('brief') and notion_configured()):
+            try:
+                page_id = sync_appointment(
+                    result, result['brief'], result.get('brief_text') or '')
+                store.save_notion_sync(result['id'], page_id=page_id)
+            except (requests.RequestException, ValueError, KeyError) as exc:
+                error_code = getattr(exc, 'safe_code', type(exc).__name__)
+                app.logger.warning('notion_cancellation_sync_failed code=%s', error_code)
+                store.save_notion_sync(result['id'], error=error_code)
         return jsonify(appointment_id=result['id'], status=result['status'],
                        matched=bool(result.get('conversation_id'))), 202
     @app.get('/api/appointments')
